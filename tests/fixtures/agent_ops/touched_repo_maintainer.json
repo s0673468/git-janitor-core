@@ -1,0 +1,298 @@
+{
+  "cases": [
+    {
+      "name": "pr lookup failure is a hard stop",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleApp",
+        "candidate": "repo fleet maintainer review",
+        "safety_score": null,
+        "recent_files": [],
+        "pr_lookup_errors": ["SampleApp: gh pr list failed"],
+        "open_codex_prs": [],
+        "permission_sensitive": false,
+        "changed_paths": ["recent-commit:main:2026-06-26 08:00:00 -0300"]
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "pr-hard-stop-lookup-failed"
+      }
+    },
+    {
+      "name": "eligible repo waits for local gate and candidate score",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleTool",
+        "candidate": "repo fleet maintainer review",
+        "safety_score": null,
+        "recent_files": [],
+        "open_codex_prs": [],
+        "permission_sensitive": false,
+        "changed_paths": ["recent-commit:main:2026-06-26 08:00:00 -0300"]
+      },
+      "expected": {
+        "disposition": "wait",
+        "category": "needs-local-gate-and-score"
+      }
+    },
+    {
+      "name": "dirty repo is a hard stop before scoring",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleTool",
+        "candidate": "README validation drift",
+        "safety_score": 5,
+        "recent_files": [],
+        "dirty_files": ["scripts/sample_state.py"],
+        "open_codex_prs": [],
+        "permission_sensitive": false,
+        "changed_paths": ["README.md"]
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "dirty-worktree"
+      }
+    },
+    {
+      "name": "missing origin is an approval-only publication boundary",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "Study",
+        "candidate": "validation docs",
+        "safety_score": 5,
+        "recent_files": [],
+        "publication_boundary": ["origin=missing", "github_repo=unresolved"],
+        "open_codex_prs": [],
+        "permission_sensitive": false,
+        "changed_paths": ["AGENTS.md"]
+      },
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "publication-boundary-blocked"
+      }
+    },
+    {
+      "name": "clean behind default branch can fast forward",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleMetrics",
+        "candidate": "small test fix",
+        "safety_score": 5,
+        "recent_files": [],
+        "fast_forward": ["branch=main", "upstream=origin/main", "behind=1"],
+        "open_codex_prs": [],
+        "permission_sensitive": false,
+        "changed_paths": ["tests/test_watch_levels.py"]
+      },
+      "expected": {
+        "disposition": "auto-act",
+        "category": "fast-forward-default-branch"
+      }
+    },
+    {
+      "name": "non fast forward remote divergence waits before scoring",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleMetrics",
+        "candidate": "small test fix",
+        "safety_score": 5,
+        "recent_files": [],
+        "remote_state": ["ahead=1", "behind=1"],
+        "open_codex_prs": [],
+        "permission_sensitive": false,
+        "changed_paths": ["tests/test_watch_levels.py"]
+      },
+      "expected": {
+        "disposition": "wait",
+        "category": "remote-divergence"
+      }
+    },
+    {
+      "name": "scanner error is a hard stop before scoring",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "git-janitor",
+        "candidate": "small parser fix",
+        "safety_score": 5,
+        "recent_files": [],
+        "repo_errors": ["failed to read git status"],
+        "open_codex_prs": [],
+        "permission_sensitive": false,
+        "changed_paths": ["src/git_janitor/git.py"]
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "repo-inspection-failed"
+      }
+    },
+    {
+      "name": "preserved graph state does not block a scored candidate",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleWeb",
+        "candidate": "focused score-model regression test",
+        "safety_score": 4,
+        "recent_files": [],
+        "preserved_paths": [".understand-anything/"],
+        "open_codex_prs": [],
+        "permission_sensitive": false,
+        "changed_paths": ["tests/smoke.mjs"]
+      },
+      "expected": {
+        "disposition": "auto-act",
+        "category": "low-risk-maintainer-fix"
+      }
+    },
+    {
+      "name": "recent file activity is a hard stop",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleApp",
+        "candidate": "docs drift",
+        "safety_score": 5,
+        "recent_files": ["lib/main.dart"],
+        "open_codex_prs": [],
+        "permission_sensitive": false,
+        "changed_paths": ["README.md"]
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "recent-activity"
+      }
+    },
+    {
+      "name": "open codex pr is a hard stop",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleMetrics",
+        "candidate": "small lint cleanup",
+        "safety_score": 5,
+        "recent_files": [],
+        "open_codex_prs": ["https://github.com/owner/sample-metrics/pull/22"],
+        "permission_sensitive": false,
+        "changed_paths": ["tests/test_render.py"]
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "in-flight-codex-pr"
+      }
+    },
+    {
+      "name": "stale ci is a hard stop before scoring",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleApp",
+        "candidate": "docs drift",
+        "safety_score": 5,
+        "recent_files": [],
+        "open_codex_prs": [],
+        "stale_ci": ["https://github.com/owner/SampleApp/pull/95:checks=stale"],
+        "permission_sensitive": false,
+        "changed_paths": ["README.md"]
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "stale-ci"
+      }
+    },
+    {
+      "name": "approval-only finding asks instead of patching",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleTool",
+        "candidate": "merged local Codex branch cleanup",
+        "safety_score": 5,
+        "recent_files": [],
+        "open_codex_prs": [],
+        "approval_only_findings": ["delete-merged-branch:SampleTool:codex/judgment-eval-harness appears safe to delete"],
+        "permission_sensitive": false,
+        "changed_paths": ["recent-commit:main:2026-06-26 08:00:00 -0300"]
+      },
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "approval-only-finding"
+      }
+    },
+    {
+      "name": "permission sensitive candidate asks instead of patching",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleApp",
+        "candidate": "weekly workflow YAML parse fix",
+        "safety_score": 5,
+        "recent_files": [],
+        "open_codex_prs": [],
+        "permission_sensitive": true,
+        "changed_paths": [".github/workflows/sample-app-weekly-review.yml"]
+      },
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "permission-sensitive"
+      }
+    },
+    {
+      "name": "low score candidate is a concise no-op",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "SampleWeb",
+        "candidate": "speculative refactor",
+        "safety_score": 3,
+        "recent_files": [],
+        "open_codex_prs": [],
+        "permission_sensitive": false,
+        "changed_paths": ["app.js"]
+      },
+      "expected": {
+        "disposition": "no-op",
+        "category": "score-below-threshold"
+      }
+    },
+    {
+      "name": "score qualified local fix can be autonomous",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "candidate": {
+        "repo": "git-janitor",
+        "candidate": "test command documentation drift",
+        "safety_score": 4,
+        "recent_files": [],
+        "open_codex_prs": [],
+        "permission_sensitive": false,
+        "changed_paths": ["AGENTS.md", "README.md"]
+      },
+      "expected": {
+        "disposition": "auto-act",
+        "category": "low-risk-maintainer-fix"
+      }
+    }
+  ]
+}

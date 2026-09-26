@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "name": "pages upload missing gtar needs approval by default",
+      "policy": {},
+      "log": "Run actions/upload-pages-artifact@v3\n/usr/bin/tar\n/Users/runner/work/_temp: gtar: command not found\nError: Process completed with exit code 127.",
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "runner-tool-missing"
+      }
+    },
+    {
+      "name": "pages upload missing gtar can be autonomous only when runner repair is explicit",
+      "policy": {
+        "auto_repair_runner_tools": true
+      },
+      "log": "Run actions/upload-pages-artifact@v3\n/usr/bin/tar\n/Users/runner/work/_temp: gtar: command not found\nError: Process completed with exit code 127.",
+      "expected": {
+        "disposition": "auto-act",
+        "category": "runner-tool-missing"
+      }
+    }
+  ]
+}

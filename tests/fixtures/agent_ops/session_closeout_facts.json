@@ -1,0 +1,45 @@
+{
+  "cases": [
+    {
+      "name": "SampleApp stale feature checkout uses fetched remote default as authority",
+      "repo_path": "/code/SampleApp",
+      "github_repo": "example-org/SampleApp",
+      "github_archived": false,
+      "default_branch": "main",
+      "origin_head_ref": "origin/main",
+      "current_branch": "codex/sample-app-slimdown",
+      "current_head": "1111111111111111111111111111111111111111",
+      "remote_default_head": "9999999999999999999999999999999999999999",
+      "ahead": 0,
+      "behind": 9,
+      "tree_matches": false,
+      "expected": {
+        "complete": true,
+        "authoritative_measurement_ref": "origin/main",
+        "warnings": [
+          "checkout-not-default",
+          "checkout-stale-vs-remote-default"
+        ]
+      }
+    },
+    {
+      "name": "OpenLoop observation does not infer lifecycle from a clean checkout",
+      "repo_path": "/code/OpenLoop",
+      "github_repo": "example-org/OpenLoop",
+      "github_archived": false,
+      "default_branch": "main",
+      "origin_head_ref": "origin/main",
+      "current_branch": "main",
+      "current_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "remote_default_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ahead": 0,
+      "behind": 0,
+      "tree_matches": true,
+      "expected": {
+        "complete": true,
+        "authoritative_measurement_ref": "origin/main",
+        "warnings": []
+      }
+    }
+  ]
+}

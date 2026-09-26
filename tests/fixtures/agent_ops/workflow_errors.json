@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "name": "scheduled workflow parse failure needs approval by default",
+      "policy": {},
+      "workflow_path": ".github/workflows/sample-app-weekly-review.yml",
+      "message": "dependency_file_not_parseable: mapping values are not allowed here in YAML block scalar",
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "workflow-parse-error"
+      }
+    },
+    {
+      "name": "scheduled workflow parse fix can be autonomous only when workflow edits are explicit",
+      "policy": {
+        "auto_fix_workflows": true
+      },
+      "workflow_path": ".github/workflows/sample-app-weekly-review.yml",
+      "message": "dependency_file_not_parseable: mapping values are not allowed here in YAML block scalar",
+      "expected": {
+        "disposition": "auto-act",
+        "category": "workflow-parse-error"
+      }
+    }
+  ]
+}

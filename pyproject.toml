@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "git-janitor"
+version = "0.1.0"
+description = "Conservative local Git and GitHub PR hygiene scanner"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "mutmut==3.7.0",
+    "ruff==0.16.3",
+]
+
+[project.scripts]
+git-janitor = "git_janitor.cli:main"
+git-safe-delete = "git_janitor.safe_delete:git_safe_delete_main"
+preserve-branch = "git_janitor.safe_delete:preserve_branch_main"
+pr-shepherd = "git_janitor.pr_shepherd:main"
+repo-facts = "git_janitor.repo_facts:main"
+git-closeout-facts = "git_janitor.closeout_facts:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# Pin the pre-0.16 default rule set; ruff 0.16.0 widened its defaults.
+# Adopt new rule groups deliberately, not via a version bump.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.mutmut]
+source_paths = ["src/git_janitor/"]
+also_copy = [".github/", "Makefile", "README.md", "config.example.toml", "docs/", "tests/"]
+pytest_add_cli_args_test_selection = ["tests/"]
+pytest_add_cli_args = ["-q"]

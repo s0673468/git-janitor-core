@@ -1,0 +1,53 @@
+{
+  "cases": [
+    {
+      "name": "ancestor branch passes with safe delete",
+      "scenario": "ancestor_pass",
+      "branch": "old-docs",
+      "expected_passed": true,
+      "expected_command": ["git", "branch", "-d", "old-docs"]
+    },
+    {
+      "name": "squash-equivalent branch uses sanctioned force delete",
+      "scenario": "squash_tree_equivalent",
+      "branch": "codex/squashed",
+      "expected_passed": true,
+      "expected_command": ["git", "branch", "-D", "codex/squashed"]
+    },
+    {
+      "name": "dirty worktree fails proof",
+      "scenario": "dirty_worktree",
+      "branch": "old-docs",
+      "expected_passed": false,
+      "failed_proof": "worktree_clean"
+    },
+    {
+      "name": "active branch fails proof",
+      "scenario": "active_branch",
+      "branch": "old-docs",
+      "expected_passed": false,
+      "failed_proof": "not_active_checkout"
+    },
+    {
+      "name": "branch checked out in linked worktree fails proof",
+      "scenario": "linked_worktree",
+      "branch": "old-docs",
+      "expected_passed": false,
+      "failed_proof": "branch_not_checked_out_elsewhere"
+    },
+    {
+      "name": "open PR fails proof",
+      "scenario": "open_pr",
+      "branch": "old-docs",
+      "expected_passed": false,
+      "failed_proof": "no_open_pr"
+    },
+    {
+      "name": "secret-like path fails proof",
+      "scenario": "secret_path",
+      "branch": "old-docs",
+      "expected_passed": false,
+      "failed_proof": "no_suspected_secret"
+    }
+  ]
+}

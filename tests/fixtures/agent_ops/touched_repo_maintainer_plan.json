@@ -1,0 +1,121 @@
+{
+  "cases": [
+    {
+      "name": "requires memory write even when no repos are touched",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "max_auto_prs": 2,
+      "max_changed_repos": 2,
+      "memory_path": "/Users/example/.local/state/git-janitor/maintainer/memory.md",
+      "candidates": [],
+      "expected_categories": [
+        "automation-memory-required"
+      ],
+      "expected_dispositions": [
+        "wait"
+      ]
+    },
+    {
+      "name": "caps score-qualified automatic fixes and records memory",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "max_auto_prs": 2,
+      "max_changed_repos": 2,
+      "memory_path": "/Users/example/.local/state/git-janitor/maintainer/memory.md",
+      "candidates": [
+        {
+          "repo": "git-janitor",
+          "candidate": "validation command docs",
+          "safety_score": 5,
+          "recent_files": [],
+          "open_codex_prs": [],
+          "permission_sensitive": false,
+          "changed_paths": ["README.md"]
+        },
+        {
+          "repo": "SampleWeb",
+          "candidate": "focused score-model regression test",
+          "safety_score": 4,
+          "recent_files": [],
+          "open_codex_prs": [],
+          "permission_sensitive": false,
+          "changed_paths": ["test/score-model.test.js"]
+        },
+        {
+          "repo": "SampleTool",
+          "candidate": "README validation drift",
+          "safety_score": 4,
+          "recent_files": [],
+          "open_codex_prs": [],
+          "permission_sensitive": false,
+          "changed_paths": ["README.md"]
+        }
+      ],
+      "expected_categories": [
+        "low-risk-maintainer-fix",
+        "low-risk-maintainer-fix",
+        "maintainer-run-cap-reached",
+        "automation-memory-required"
+      ],
+      "expected_dispositions": [
+        "auto-act",
+        "auto-act",
+        "wait",
+        "wait"
+      ]
+    },
+    {
+      "name": "fast forward consumes repo cap but not pr cap",
+      "policy": {
+        "min_safe_score": 4
+      },
+      "max_auto_prs": 1,
+      "max_changed_repos": 2,
+      "memory_path": "/Users/example/.local/state/git-janitor/maintainer/memory.md",
+      "candidates": [
+        {
+          "repo": "SampleMetrics",
+          "candidate": "default branch refresh",
+          "safety_score": null,
+          "recent_files": [],
+          "fast_forward": ["branch=main", "upstream=origin/main", "behind=1"],
+          "open_codex_prs": [],
+          "permission_sensitive": false,
+          "changed_paths": ["recent-commit:main:2026-06-26 08:00:00 -0300"]
+        },
+        {
+          "repo": "git-janitor",
+          "candidate": "validation command docs",
+          "safety_score": 5,
+          "recent_files": [],
+          "open_codex_prs": [],
+          "permission_sensitive": false,
+          "changed_paths": ["README.md"]
+        },
+        {
+          "repo": "SampleWeb",
+          "candidate": "focused score-model regression test",
+          "safety_score": 4,
+          "recent_files": [],
+          "open_codex_prs": [],
+          "permission_sensitive": false,
+          "changed_paths": ["tests/smoke.mjs"]
+        }
+      ],
+      "expected_categories": [
+        "fast-forward-default-branch",
+        "low-risk-maintainer-fix",
+        "maintainer-run-cap-reached",
+        "automation-memory-required"
+      ],
+      "expected_dispositions": [
+        "auto-act",
+        "auto-act",
+        "wait",
+        "wait"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,269 @@
+{
+  "cases": [
+    {
+      "name": "successful ff pull",
+      "scenario": "fast_forward_success",
+      "policy": {
+        "auto_fast_forward_default_branch": true,
+        "apply_categories": ["fast-forward-default-branch"]
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "fast-forward-default-branch",
+        "title": "repo: default branch can be fast-forwarded",
+        "reason": "The repo is clean and only behind upstream.",
+        "recommended_action": "Fast-forward the default branch with git pull --ff-only.",
+        "evidence": ["branch=main", "upstream=origin/main", "behind=2"]
+      },
+      "expected": {
+        "status": "applied",
+        "command": ["git", "pull", "--ff-only"]
+      }
+    },
+    {
+      "name": "successful merged branch delete",
+      "scenario": "delete_branch_success",
+      "policy": {
+        "auto_delete_merged_branches": true,
+        "apply_categories": ["delete-merged-branch"]
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "delete-merged-branch",
+        "title": "repo:old-docs can be deleted",
+        "reason": "The branch is merged to the default ref and has no unique commits.",
+        "recommended_action": "Delete exactly old-docs with git branch -d.",
+        "evidence": [
+          "default_ref=origin/main",
+          "merged_to_default=True",
+          "unique_commit_count=0",
+          "upstream=origin/old-docs"
+        ]
+      },
+      "expected": {
+        "status": "applied",
+        "command": ["git", "branch", "-d", "old-docs"]
+      }
+    },
+    {
+      "name": "successful green pr merge",
+      "scenario": "merge_pr_success",
+      "policy": {
+        "auto_merge_green_prs": true,
+        "apply_categories": ["merge-green-pr"]
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "merge-green-pr",
+        "title": "owner/repo#42: docs cleanup can be squash-merged",
+        "reason": "Checks are green, merge state is clean, and no high-risk patterns matched.",
+        "recommended_action": "Squash-merge the ready PR.",
+        "evidence": ["checks=success", "mergeState=CLEAN", "review=unknown", "draft=False"]
+      },
+      "expected": {
+        "status": "applied",
+        "command": ["gh", "pr", "merge", "42", "--squash", "--repo", "owner/repo"]
+      }
+    },
+    {
+      "name": "successful draft ready",
+      "scenario": "mark_ready_success",
+      "policy": {
+        "auto_mark_drafts_ready": true,
+        "apply_categories": ["mark-draft-ready"]
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "mark-draft-ready",
+        "title": "owner/repo#43: test cleanup can be marked ready",
+        "reason": "Checks are green, no high-risk patterns matched, and policy allows draft readiness.",
+        "recommended_action": "Mark the draft PR ready for review.",
+        "evidence": ["checks=success", "mergeState=DRAFT", "review=unknown", "draft=True"]
+      },
+      "expected": {
+        "status": "applied",
+        "command": ["gh", "pr", "ready", "43", "--repo", "owner/repo"]
+      }
+    },
+    {
+      "name": "ff pull drifts when worktree becomes dirty",
+      "scenario": "fast_forward_dirty",
+      "policy": {
+        "auto_fast_forward_default_branch": true,
+        "apply_categories": ["fast-forward-default-branch"]
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "fast-forward-default-branch",
+        "title": "repo: default branch can be fast-forwarded",
+        "reason": "The repo is clean and only behind upstream.",
+        "recommended_action": "Fast-forward the default branch with git pull --ff-only.",
+        "evidence": ["branch=main", "upstream=origin/main", "behind=2"]
+      },
+      "expected": {
+        "status": "drifted",
+        "command": ["git", "pull", "--ff-only"]
+      }
+    },
+    {
+      "name": "ff pull drifts when branch is ahead",
+      "scenario": "fast_forward_ahead",
+      "policy": {
+        "auto_fast_forward_default_branch": true,
+        "apply_categories": ["fast-forward-default-branch"]
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "fast-forward-default-branch",
+        "title": "repo: default branch can be fast-forwarded",
+        "reason": "The repo is clean and only behind upstream.",
+        "recommended_action": "Fast-forward the default branch with git pull --ff-only.",
+        "evidence": ["branch=main", "upstream=origin/main", "behind=2"]
+      },
+      "expected": {
+        "status": "drifted",
+        "command": ["git", "pull", "--ff-only"]
+      }
+    },
+    {
+      "name": "ff pull drifts when upstream changed",
+      "scenario": "fast_forward_changed_upstream",
+      "policy": {
+        "auto_fast_forward_default_branch": true,
+        "apply_categories": ["fast-forward-default-branch"]
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "fast-forward-default-branch",
+        "title": "repo: default branch can be fast-forwarded",
+        "reason": "The repo is clean and only behind upstream.",
+        "recommended_action": "Fast-forward the default branch with git pull --ff-only.",
+        "evidence": ["branch=main", "upstream=origin/main", "behind=2"]
+      },
+      "expected": {
+        "status": "drifted",
+        "command": ["git", "pull", "--ff-only"]
+      }
+    },
+    {
+      "name": "branch delete drifts when branch is current",
+      "scenario": "delete_branch_current",
+      "policy": {
+        "auto_delete_merged_branches": true,
+        "apply_categories": ["delete-merged-branch"]
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "delete-merged-branch",
+        "title": "repo:old-docs can be deleted",
+        "reason": "The branch is merged to the default ref and has no unique commits.",
+        "recommended_action": "Delete exactly old-docs with git branch -d.",
+        "evidence": ["default_ref=origin/main", "unique_commit_count=0"]
+      },
+      "expected": {
+        "status": "drifted",
+        "command": ["git", "branch", "-d", "old-docs"]
+      }
+    },
+    {
+      "name": "branch delete drifts when branch is default",
+      "scenario": "delete_default_branch",
+      "policy": {
+        "auto_delete_merged_branches": true,
+        "apply_categories": ["delete-merged-branch"]
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "delete-merged-branch",
+        "title": "repo:main can be deleted",
+        "reason": "The branch is merged to the default ref and has no unique commits.",
+        "recommended_action": "Delete exactly main with git branch -d.",
+        "evidence": ["default_ref=origin/main", "unique_commit_count=0"]
+      },
+      "expected": {
+        "status": "drifted",
+        "command": ["git", "branch", "-d", "main"]
+      }
+    },
+    {
+      "name": "green pr merge drifts on high-risk files",
+      "scenario": "merge_pr_high_risk",
+      "policy": {
+        "auto_merge_green_prs": true,
+        "apply_categories": ["merge-green-pr"]
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "merge-green-pr",
+        "title": "owner/repo#44: docs cleanup can be squash-merged",
+        "reason": "Checks are green, merge state is clean, and no high-risk patterns matched.",
+        "recommended_action": "Squash-merge the ready PR.",
+        "evidence": ["checks=success", "mergeState=CLEAN", "review=unknown", "draft=False"]
+      },
+      "expected": {
+        "status": "drifted",
+        "command": ["gh", "pr", "merge", "44", "--squash", "--repo", "owner/repo"]
+      }
+    },
+    {
+      "name": "draft ready drifts when no longer draft",
+      "scenario": "mark_ready_not_draft",
+      "policy": {
+        "auto_mark_drafts_ready": true,
+        "apply_categories": ["mark-draft-ready"]
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "mark-draft-ready",
+        "title": "owner/repo#45: test cleanup can be marked ready",
+        "reason": "Checks are green, no high-risk patterns matched, and policy allows draft readiness.",
+        "recommended_action": "Mark the draft PR ready for review.",
+        "evidence": ["checks=success", "mergeState=DRAFT", "review=unknown", "draft=True"]
+      },
+      "expected": {
+        "status": "drifted",
+        "command": ["gh", "pr", "ready", "45", "--repo", "owner/repo"]
+      }
+    },
+    {
+      "name": "disallowed category is skipped",
+      "scenario": "no_commands",
+      "policy": {
+        "auto_delete_merged_branches": true,
+        "apply_categories": []
+      },
+      "decision": {
+        "disposition": "auto-act",
+        "category": "delete-merged-branch",
+        "title": "repo:old-docs can be deleted",
+        "reason": "The branch is merged to the default ref and has no unique commits.",
+        "recommended_action": "Delete exactly old-docs with git branch -d.",
+        "evidence": ["default_ref=origin/main", "unique_commit_count=0"]
+      },
+      "expected": {
+        "status": "skipped",
+        "command": []
+      }
+    },
+    {
+      "name": "needs approval high-risk pr is skipped",
+      "scenario": "no_commands",
+      "policy": {
+        "auto_merge_green_prs": true,
+        "apply_categories": ["merge-green-pr"]
+      },
+      "decision": {
+        "disposition": "needs-approval",
+        "category": "high-risk-pr",
+        "title": "owner/repo#46: workflow change is green but high risk",
+        "reason": "Changed files or title match high-risk policy.",
+        "recommended_action": "Request or wait for focused review before merge.",
+        "evidence": ["risk=.github workflow/config change"]
+      },
+      "expected": {
+        "status": "skipped",
+        "command": []
+      }
+    }
+  ]
+}

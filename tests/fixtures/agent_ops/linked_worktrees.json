@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "name": "upstream-gone linked worktree with empty tree diff needs approval",
+      "repo": {
+        "path": "/repo",
+        "name": "repo",
+        "default_branch": "main",
+        "default_ref": "origin/main"
+      },
+      "worktree": {
+        "path": "/tmp/repo-old",
+        "branch": "codex/old",
+        "upstream": "origin/codex/old",
+        "upstream_gone": true,
+        "default_ref": "origin/main",
+        "tree_matches_default": true,
+        "unique_commit_count": 0
+      },
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "stale-linked-worktree-cleanup"
+      }
+    },
+    {
+      "name": "empty tree diff with unique commits is blocked",
+      "repo": {
+        "path": "/repo",
+        "name": "repo",
+        "default_branch": "main",
+        "default_ref": "origin/main"
+      },
+      "worktree": {
+        "path": "/tmp/repo-empty-history",
+        "branch": "codex/empty-history",
+        "upstream": "origin/codex/empty-history",
+        "upstream_gone": true,
+        "default_ref": "origin/main",
+        "tree_matches_default": true,
+        "unique_commit_count": 1
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "stale-linked-worktree-not-safe"
+      }
+    },
+    {
+      "name": "synthetic upstream-gone linked worktree with non-empty tree diff is blocked",
+      "repo": {
+        "path": "/repo",
+        "name": "SampleApp",
+        "default_branch": "main",
+        "default_ref": "origin/main"
+      },
+      "worktree": {
+        "path": "/Users/example/Documents/Automation/work/sample-app-change",
+        "branch": "codex/service-token-hardening-7",
+        "head": "cccccccccccccccccccccccccccccccccccccccc",
+        "upstream": "origin/codex/service-token-hardening-7",
+        "upstream_gone": true,
+        "default_ref": "origin/main",
+        "tree_matches_default": false,
+        "unique_commit_count": 0
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "stale-linked-worktree-not-safe"
+      }
+    },
+    {
+      "name": "dirty upstream-gone linked worktree is blocked",
+      "repo": {
+        "path": "/repo",
+        "name": "repo",
+        "default_branch": "main",
+        "default_ref": "origin/main"
+      },
+      "worktree": {
+        "path": "/tmp/repo-dirty",
+        "branch": "codex/old",
+        "upstream": "origin/codex/old",
+        "upstream_gone": true,
+        "default_ref": "origin/main",
+        "tree_matches_default": true,
+        "unique_commit_count": 0,
+        "dirty_files": ["src/app.py"]
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "stale-linked-worktree-not-safe"
+      }
+    },
+    {
+      "name": "linked worktree with active upstream has no action",
+      "repo": {
+        "path": "/repo",
+        "name": "repo",
+        "default_branch": "main",
+        "default_ref": "origin/main"
+      },
+      "worktree": {
+        "path": "/tmp/repo-active",
+        "branch": "codex/active",
+        "upstream": "origin/codex/active",
+        "upstream_gone": false,
+        "default_ref": "origin/main",
+        "tree_matches_default": true,
+        "unique_commit_count": 0
+      },
+      "expected": {
+        "disposition": "no-op",
+        "category": "linked-worktree-active-upstream"
+      }
+    }
+  ]
+}

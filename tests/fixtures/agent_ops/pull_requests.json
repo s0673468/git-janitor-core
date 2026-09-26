@@ -1,0 +1,317 @@
+{
+  "cases": [
+    {
+      "name": "low risk green pr can merge when policy allows it",
+      "policy": {
+        "auto_merge_green_prs": true
+      },
+      "high_risk_patterns": ["auth", "secret", "sync", "schema", "launchd", "background"],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 10,
+        "title": "Fix README wording",
+        "url": "https://github.com/owner/repo/pull/10",
+        "head_ref": "docs-readme",
+        "base_ref": "main",
+        "is_draft": false,
+        "merge_state": "CLEAN",
+        "review_decision": null,
+        "check_status": "success",
+        "changed_files": ["README.md"]
+      },
+      "expected": {
+        "disposition": "auto-act",
+        "category": "merge-green-pr"
+      }
+    },
+    {
+      "name": "green low risk pr needs approval by default",
+      "policy": {},
+      "high_risk_patterns": ["auth", "secret", "sync", "schema", "launchd", "background"],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 17,
+        "title": "Fix README wording",
+        "url": "https://github.com/owner/repo/pull/17",
+        "head_ref": "docs-readme-default",
+        "base_ref": "main",
+        "is_draft": false,
+        "merge_state": "CLEAN",
+        "review_decision": null,
+        "check_status": "success",
+        "changed_files": ["README.md"]
+      },
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "green-pr-needs-approval"
+      }
+    },
+    {
+      "name": "workflow pr stays approval gated even with auto merge enabled",
+      "policy": {
+        "auto_merge_green_prs": true
+      },
+      "high_risk_patterns": ["auth", "secret", "sync", "schema", "launchd", "background"],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 11,
+        "title": "Route CI to self-hosted runner",
+        "url": "https://github.com/owner/repo/pull/11",
+        "head_ref": "ci-runner-routing",
+        "base_ref": "main",
+        "is_draft": false,
+        "merge_state": "CLEAN",
+        "review_decision": null,
+        "check_status": "success",
+        "changed_files": [".github/workflows/test.yml"]
+      },
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "high-risk-pr"
+      }
+    },
+    {
+      "name": "deploy pr stays approval gated even when config misses deploy",
+      "policy": {
+        "auto_merge_green_prs": true
+      },
+      "high_risk_patterns": ["auth", "secret", "sync", "schema", "launchd", "background"],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 16,
+        "title": "Update deploy script",
+        "url": "https://github.com/owner/repo/pull/16",
+        "head_ref": "deploy-script",
+        "base_ref": "main",
+        "is_draft": false,
+        "merge_state": "CLEAN",
+        "review_decision": null,
+        "check_status": "success",
+        "changed_files": ["scripts/deploy.py"]
+      },
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "high-risk-pr"
+      }
+    },
+    {
+      "name": "green low risk draft can be marked ready when policy allows it",
+      "policy": {
+        "auto_mark_drafts_ready": true
+      },
+      "high_risk_patterns": ["auth", "secret", "sync", "schema", "launchd", "background"],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 12,
+        "title": "Small test cleanup",
+        "url": "https://github.com/owner/repo/pull/12",
+        "head_ref": "test-cleanup",
+        "base_ref": "main",
+        "is_draft": true,
+        "merge_state": "DRAFT",
+        "review_decision": null,
+        "check_status": "success",
+        "changed_files": ["tests/test_parser.py"]
+      },
+      "expected": {
+        "disposition": "auto-act",
+        "category": "mark-draft-ready"
+      }
+    },
+    {
+      "name": "green high risk draft remains approval gated",
+      "policy": {
+        "auto_mark_drafts_ready": true
+      },
+      "high_risk_patterns": ["auth", "secret", "sync", "schema", "launchd", "background"],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 13,
+        "title": "Adjust sync provenance",
+        "url": "https://github.com/owner/repo/pull/13",
+        "head_ref": "sync-provenance",
+        "base_ref": "main",
+        "is_draft": true,
+        "merge_state": "DRAFT",
+        "review_decision": null,
+        "check_status": "success",
+        "changed_files": ["scripts/sync_server.py"]
+      },
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "high-risk-draft-pr"
+      }
+    },
+    {
+      "name": "stale ci becomes a distinct blocker",
+      "policy": {
+        "auto_merge_green_prs": true
+      },
+      "high_risk_patterns": ["auth", "secret", "sync", "schema", "launchd", "background"],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 16,
+        "title": "Refresh stale checks",
+        "url": "https://github.com/owner/repo/pull/16",
+        "head_ref": "codex/refresh-stale-checks",
+        "base_ref": "main",
+        "is_draft": false,
+        "merge_state": "CLEAN",
+        "review_decision": null,
+        "check_status": "stale",
+        "changed_files": ["README.md"]
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "stale-ci"
+      }
+    },
+    {
+      "name": "failing pr becomes blocked evidence instead of action",
+      "policy": {
+        "auto_merge_green_prs": true
+      },
+      "high_risk_patterns": ["auth", "secret", "sync", "schema", "launchd", "background"],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 14,
+        "title": "Fix app startup",
+        "url": "https://github.com/owner/repo/pull/14",
+        "head_ref": "startup-fix",
+        "base_ref": "main",
+        "is_draft": false,
+        "merge_state": "CLEAN",
+        "review_decision": null,
+        "check_status": "failure",
+        "changed_files": ["app.py"]
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "ci-failure"
+      }
+    },
+    {
+      "name": "pending pr is waited on rather than acted on",
+      "policy": {
+        "auto_merge_green_prs": true
+      },
+      "high_risk_patterns": ["auth", "secret", "sync", "schema", "launchd", "background"],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 15,
+        "title": "Tiny lint cleanup",
+        "url": "https://github.com/owner/repo/pull/15",
+        "head_ref": "lint-cleanup",
+        "base_ref": "main",
+        "is_draft": false,
+        "merge_state": "CLEAN",
+        "review_decision": null,
+        "check_status": "pending",
+        "changed_files": ["src/app.py"]
+      },
+      "expected": {
+        "disposition": "wait",
+        "category": "pending-checks"
+      }
+    },
+    {
+      "name": "tests-only green PR ignores REVIEW_REQUIRED",
+      "policy": {
+        "auto_merge_green_prs": true
+      },
+      "high_risk_patterns": [
+        "auth",
+        "secret",
+        "sync",
+        "schema",
+        "launchd",
+        "background"
+      ],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 10,
+        "title": "Fix README wording",
+        "url": "https://github.com/owner/repo/pull/10",
+        "head_ref": "docs-readme",
+        "base_ref": "main",
+        "is_draft": false,
+        "merge_state": "CLEAN",
+        "review_decision": "REVIEW_REQUIRED",
+        "check_status": "success",
+        "changed_files": [
+          "README.md"
+        ]
+      },
+      "expected": {
+        "disposition": "auto-act",
+        "category": "merge-green-pr"
+      }
+    },
+    {
+      "name": "tests-only green PR ignores CHANGES_REQUESTED",
+      "policy": {
+        "auto_merge_green_prs": true
+      },
+      "high_risk_patterns": [
+        "auth",
+        "secret",
+        "sync",
+        "schema",
+        "launchd",
+        "background"
+      ],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 10,
+        "title": "Fix README wording",
+        "url": "https://github.com/owner/repo/pull/10",
+        "head_ref": "docs-readme",
+        "base_ref": "main",
+        "is_draft": false,
+        "merge_state": "CLEAN",
+        "review_decision": "CHANGES_REQUESTED",
+        "check_status": "success",
+        "changed_files": [
+          "README.md"
+        ]
+      },
+      "expected": {
+        "disposition": "auto-act",
+        "category": "merge-green-pr"
+      }
+    },
+    {
+      "name": "tests-only removal of review gates still blocks failed tests",
+      "policy": {
+        "auto_merge_green_prs": true
+      },
+      "high_risk_patterns": [
+        "auth",
+        "secret",
+        "sync",
+        "schema",
+        "launchd",
+        "background"
+      ],
+      "pr": {
+        "repo": "owner/repo",
+        "number": 10,
+        "title": "Fix README wording",
+        "url": "https://github.com/owner/repo/pull/10",
+        "head_ref": "docs-readme",
+        "base_ref": "main",
+        "is_draft": false,
+        "merge_state": "CLEAN",
+        "review_decision": "CHANGES_REQUESTED",
+        "check_status": "failure",
+        "changed_files": [
+          "README.md"
+        ]
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "ci-failure"
+      }
+    }
+  ]
+}

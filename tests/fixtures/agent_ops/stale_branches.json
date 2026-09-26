@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "name": "merged branch can be deleted when policy allows exact deletion",
+      "policy": {
+        "auto_delete_merged_branches": true
+      },
+      "repo": {
+        "path": "/tmp/repo",
+        "name": "repo",
+        "default_branch": "main",
+        "default_ref": "origin/main"
+      },
+      "branch": {
+        "name": "docs-old",
+        "upstream": "origin/docs-old",
+        "merged_to_default": true,
+        "unique_commit_count": 0,
+        "current": false
+      },
+      "expected": {
+        "disposition": "auto-act",
+        "category": "delete-merged-branch"
+      }
+    },
+    {
+      "name": "merged branch asks for exact approval when deletion is not enabled",
+      "policy": {},
+      "repo": {
+        "path": "/tmp/repo",
+        "name": "repo",
+        "default_branch": "main",
+        "default_ref": "origin/main"
+      },
+      "branch": {
+        "name": "docs-old",
+        "upstream": "origin/docs-old",
+        "merged_to_default": true,
+        "unique_commit_count": 0,
+        "current": false
+      },
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "delete-merged-branch"
+      }
+    },
+    {
+      "name": "local only branch asks for disposition",
+      "policy": {
+        "auto_delete_merged_branches": true
+      },
+      "repo": {
+        "path": "/tmp/repo",
+        "name": "repo",
+        "default_branch": "main",
+        "default_ref": "origin/main"
+      },
+      "branch": {
+        "name": "experiment",
+        "upstream": null,
+        "merged_to_default": false,
+        "unique_commit_count": 2,
+        "current": false
+      },
+      "expected": {
+        "disposition": "needs-approval",
+        "category": "branch-without-upstream"
+      }
+    },
+    {
+      "name": "dirty repo blocks branch cleanup",
+      "policy": {
+        "auto_delete_merged_branches": true
+      },
+      "repo": {
+        "path": "/tmp/repo",
+        "name": "repo",
+        "default_branch": "main",
+        "default_ref": "origin/main",
+        "dirty_files": ["src/app.py"]
+      },
+      "branch": {
+        "name": "docs-old",
+        "upstream": "origin/docs-old",
+        "merged_to_default": true,
+        "unique_commit_count": 0,
+        "current": false
+      },
+      "expected": {
+        "disposition": "report-blocked",
+        "category": "dirty-worktree"
+      }
+    }
+  ]
+}

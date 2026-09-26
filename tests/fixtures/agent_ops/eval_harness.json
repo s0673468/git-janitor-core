@@ -1,0 +1,99 @@
+{
+  "cases": [
+    {
+      "domain": "touched-repo maintenance",
+      "source": "touched_repo_maintainer.json",
+      "case": "eligible repo waits for local gate and candidate score",
+      "expected": {
+        "dispositions": ["wait"],
+        "categories": ["needs-local-gate-and-score"]
+      },
+      "default_policy_read_only": true
+    },
+    {
+      "domain": "dirty worktrees",
+      "source": "touched_repo_maintainer.json",
+      "case": "dirty repo is a hard stop before scoring",
+      "expected": {
+        "dispositions": ["report-blocked"],
+        "categories": ["dirty-worktree"]
+      },
+      "default_policy_read_only": true
+    },
+    {
+      "domain": "pr babysitting",
+      "source": "pull_requests.json",
+      "case": "green low risk pr needs approval by default",
+      "expected": {
+        "dispositions": ["needs-approval"],
+        "categories": ["green-pr-needs-approval"]
+      },
+      "default_policy_read_only": true
+    },
+    {
+      "domain": "pr babysitting",
+      "source": "pull_requests.json",
+      "case": "pending pr is waited on rather than acted on",
+      "expected": {
+        "dispositions": ["wait"],
+        "categories": ["pending-checks"]
+      },
+      "default_policy_read_only": true
+    },
+    {
+      "domain": "ci failure triage",
+      "source": "pull_requests.json",
+      "case": "failing pr becomes blocked evidence instead of action",
+      "expected": {
+        "dispositions": ["report-blocked"],
+        "categories": ["ci-failure"]
+      },
+      "default_policy_read_only": true
+    },
+    {
+      "domain": "ci failure triage",
+      "source": "runner_failures.json",
+      "case": "pages upload missing gtar needs approval by default",
+      "expected": {
+        "dispositions": ["needs-approval"],
+        "categories": ["runner-tool-missing"]
+      },
+      "default_policy_read_only": true
+    },
+    {
+      "domain": "stale branches",
+      "source": "stale_branches.json",
+      "case": "merged branch asks for exact approval when deletion is not enabled",
+      "expected": {
+        "dispositions": ["needs-approval"],
+        "categories": ["delete-merged-branch"]
+      },
+      "default_policy_read_only": true
+    },
+    {
+      "domain": "workflow blockers",
+      "source": "workflow_errors.json",
+      "case": "scheduled workflow parse failure needs approval by default",
+      "expected": {
+        "dispositions": ["needs-approval"],
+        "categories": ["workflow-parse-error"]
+      },
+      "default_policy_read_only": true
+    },
+    {
+      "domain": "touched-repo maintenance",
+      "source": "touched_repo_maintainer_plan.json",
+      "case": "caps score-qualified automatic fixes and records memory",
+      "expected": {
+        "dispositions": ["auto-act", "auto-act", "wait", "wait"],
+        "categories": [
+          "low-risk-maintainer-fix",
+          "low-risk-maintainer-fix",
+          "maintainer-run-cap-reached",
+          "automation-memory-required"
+        ]
+      },
+      "default_policy_read_only": false
+    }
+  ]
+}

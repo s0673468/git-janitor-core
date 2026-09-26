@@ -1,0 +1,164 @@
+{
+  "one_pass": [
+    {
+      "name": "trusted clean receipt refuses a second provider pass",
+      "receipt_priority": null,
+      "override": null,
+      "expected_exit": 6
+    },
+    {
+      "name": "trusted blocking receipt refuses a second provider pass",
+      "receipt_priority": "P1",
+      "override": null,
+      "expected_exit": 6
+    },
+    {
+      "name": "materially new high-risk scope allows one more pass",
+      "receipt_priority": null,
+      "override": "new_scope",
+      "reason": "new database migration landed",
+      "expected_exit": 0
+    },
+    {
+      "name": "explicit force allows one more pass",
+      "receipt_priority": null,
+      "override": "force",
+      "expected_exit": 0
+    }
+  ],
+  "priority_blocking": [
+    {
+      "name": "P1 blocks",
+      "priority": "P1",
+      "blocking": true,
+      "counts": {"p1": 1, "p2": 0, "p3": 0}
+    },
+    {
+      "name": "P2 is nonblocking",
+      "priority": "P2",
+      "blocking": false,
+      "counts": {"p1": 0, "p2": 1, "p3": 0}
+    },
+    {
+      "name": "P3 is nonblocking",
+      "priority": "P3",
+      "blocking": false,
+      "counts": {"p1": 0, "p2": 0, "p3": 1}
+    }
+  ],
+  "old_receipt": {
+    "provider": "grok",
+    "model": "grok-4.5",
+    "head": "1111111111111111111111111111111111111111",
+    "report_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "outcome": "findings",
+    "blocking": true
+  },
+  "current_receipt": {
+    "provider": "luna",
+    "model": "gpt-5.6-luna",
+    "reasoning": "max",
+    "head": "1111111111111111111111111111111111111111",
+    "report_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "outcome": "clean",
+    "blocking": false
+  },
+  "prompt_contract": {
+    "hazard": "schema migration and auth boundary",
+    "required_phrases": [
+      "Report every P1. Report at most 5 P2 and P3 findings combined",
+      "a reachable execution path under the shipped configuration",
+      "A coverage mismatch fails closed.",
+      "Speculative format-drift robustness, hypothetical-platform portability, and style nits are out of scope or at most P3."
+    ],
+    "hazard_phrase": "Declared hazard class: schema migration and auth boundary. Focus the review on this hazard."
+  },
+  "timeout_retry": [
+    {
+      "name": "one timeout fails closed without retry",
+      "timeouts": 1,
+      "expected_status": "hard_failure",
+      "expected_provider_calls": 1
+    },
+    {
+      "name": "partial output fails closed without retry",
+      "timeouts": 0,
+      "expected_status": "hard_failure",
+      "expected_provider_calls": 1
+    }
+  ],
+  "convergence": [
+    {
+      "name": "two trailing blocking rounds with no new low refuse",
+      "findings": [3, 4, 4],
+      "expected_exit": 5
+    },
+    {
+      "name": "a new low in the trailing two permits the allowed pass",
+      "findings": [4, 3, 2],
+      "expected_exit": 0
+    }
+  ],
+  "fix_forward": {
+    "receipt_head": "9999999999999999999999999999999999999999",
+    "merge_head": "1111111111111111111111111111111111111111",
+    "summary": "Fixed the transaction ordering and dismissed the stale path claim with code evidence.",
+    "cases": [
+      {
+        "name": "descendant marker post and trusted readback continue merge",
+        "use_flag": true,
+        "descendant": true,
+        "post_ok": true,
+        "readback_ok": true,
+        "expected_exit": 0,
+        "expected_posts": 1,
+        "expected_merges": 1
+      },
+      {
+        "name": "non-descendant fails closed before posting",
+        "use_flag": true,
+        "descendant": false,
+        "post_ok": true,
+        "readback_ok": true,
+        "expected_exit": 4,
+        "expected_posts": 0,
+        "expected_merges": 0
+      },
+      {
+        "name": "post failure fails closed",
+        "use_flag": true,
+        "descendant": true,
+        "post_ok": false,
+        "readback_ok": true,
+        "expected_exit": 4,
+        "expected_posts": 1,
+        "expected_merges": 0
+      },
+      {
+        "name": "untrusted readback fails closed",
+        "use_flag": true,
+        "descendant": true,
+        "post_ok": true,
+        "readback_ok": false,
+        "expected_exit": 4,
+        "expected_posts": 1,
+        "expected_merges": 0
+      },
+      {
+        "name": "without fix-forward blocking receipt keeps exit four",
+        "use_flag": false,
+        "descendant": true,
+        "post_ok": true,
+        "readback_ok": true,
+        "expected_exit": 4,
+        "expected_posts": 0,
+        "expected_merges": 0
+      }
+    ]
+  },
+  "thread_priorities": [
+    {"priority": "P1", "blocking": true},
+    {"priority": "P2", "blocking": false},
+    {"priority": "P3", "blocking": false}
+  ]
+}

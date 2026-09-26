@@ -1,0 +1,22 @@
+# Keep the real configuration and generated reports outside the public source.
+[scanner]
+# Populate only repositories you own or are authorized to inspect.
+scan_roots = []
+repos = []
+max_depth = 3
+fetch_prune = false
+default_branch = "main"
+github_author = "@me"
+stale_branch_days = 14
+command_timeout_seconds = 45
+
+[actions]
+auto_merge_green_prs = false
+auto_delete_merged_branches = false
+auto_mark_drafts_ready = false
+auto_fast_forward_default_branch = false
+apply_categories = []
+# ledger_path = "/absolute/private/path/execution-audit.jsonl"
+
+[inventory]
+project_registry_path = "~/.config/git-janitor/projects.json"
