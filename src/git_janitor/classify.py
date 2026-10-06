@@ -100,11 +100,13 @@ def classify_repo(
     current_upstream_gone = any(branch.current and branch.upstream_gone for branch in repo.branches)
     if repo.current_branch == "HEAD":
         findings.append(_detached_finding(repo.path, repo.name, repo.head_oid, repo.head_unique_commit_count))
-    elif (repo.upstream is None or current_upstream_gone) and repo.head_unique_commit_count:
+    elif ((repo.upstream is None and repo.tracking_configured is not True)
+          or current_upstream_gone) and repo.head_unique_commit_count:
         findings.append(_unpublished_finding(
             repo.path, repo.name, repo.current_branch or "current branch",
             repo.head_unique_commit_count, repo.default_ref or repo.default_branch,
             upstream_gone=current_upstream_gone,
+            tracking_configured=repo.tracking_configured,
         ))
 
     for worktree in repo.linked_worktrees:
@@ -123,11 +125,13 @@ def classify_repo(
             findings.append(_detached_finding(
                 worktree.path, repo.name, worktree.head, worktree.unique_commit_count,
             ))
-        elif (worktree.upstream is None or worktree.upstream_gone) and worktree.unique_commit_count:
+        elif ((worktree.upstream is None and worktree.tracking_configured is not True)
+              or worktree.upstream_gone) and worktree.unique_commit_count:
             findings.append(_unpublished_finding(
                 worktree.path, repo.name, worktree.branch, worktree.unique_commit_count,
                 worktree.default_ref or repo.default_ref or repo.default_branch,
                 upstream_gone=worktree.upstream_gone,
+                tracking_configured=worktree.tracking_configured,
             ))
         if worktree.ahead:
             findings.append(Finding(
@@ -173,12 +177,14 @@ def classify_repo(
                     recommended_action="Preserve until current merge, publication, inactivity and ownership proof are complete; ancestry alone does not authorize cleanup.",
                 )
             )
-        elif (branch.upstream is None or branch.upstream_gone) and branch.unique_commit_count and branch.name not in linked_branch_names:
+        elif ((branch.upstream is None and branch.tracking_configured is not True)
+              or branch.upstream_gone) and branch.unique_commit_count and branch.name not in linked_branch_names:
             findings.append(
                 _unpublished_finding(
                     repo.path, repo.name, branch.name, branch.unique_commit_count,
                     repo.default_ref or repo.default_branch,
                     upstream_gone=branch.upstream_gone,
+                    tracking_configured=branch.tracking_configured,
                 )
             )
 
@@ -198,11 +204,18 @@ def classify_repo(
 
 def _unpublished_finding(
     path: str, name: str, branch: str, unique: int, base: str,
-    *, upstream_gone: bool = False,
+    *, upstream_gone: bool = False, tracking_configured: bool | None = None,
 ) -> Finding:
-    upstream_state = "gone upstream" if upstream_gone else "no upstream"
+    upstream_state = (
+        "missing local upstream ref ([gone]); remote existence and publication unknown"
+        if upstream_gone else
+        "no tracking configured" if tracking_configured is False else
+        "local upstream unresolved; tracking configuration unknown"
+    )
     return Finding(
-        severity="medium", category="branch-without-upstream",
+        severity="medium",
+        category=("scanner-error" if tracking_configured is None and not upstream_gone
+                  else "branch-without-upstream"),
         title=f"{name}: local branch {branch} has {upstream_state}",
         detail=f"{branch} has {unique} unique commit(s) versus {base} and {upstream_state}.",
         repo_path=path,

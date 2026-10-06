@@ -169,6 +169,16 @@
       "test_pointer": "tests/test_scan_plans.py::test_GQ19_physical_alias_selects_discovered_checkout",
       "addendum_baseline_commit": "342e64d914ef74e4f66148d1d11df23d5d053c62",
       "evidence": "Confirmed against standalone export baseline; synthetic regression and owning-platform identity probes preserve the original trigger. Private source evidence is retained outside the distribution."
+    },
+    {
+      "id": "GQ20",
+      "input": "Configured tracking with unmapped partial fetch or missing local upstream ref; unconfigured, valid mapping, linked/noncurrent, inaccessible config and credential controls",
+      "source_kind": "disposable-git-and-mocked-config",
+      "expected_disposition": "Retain configured tracking separately from resolved upstream; configured-unmapped is an explicit comparison gap, missing local refs do not prove remote deletion, preserve unique/dirty work and block uncertain operator action",
+      "preserved_unknowns": "Uncollected upstream comparison, remote existence/publication, config inspection, ownership and delivery authority",
+      "test_pointer": "tests/test_partial_tracking.py::test_GQ20_configured_unmapped_tracking_is_comparison_unknown",
+      "addendum_baseline_commit": "35fc4e12bf29d4edbbf297478cccea44093135e7",
+      "evidence": "Synthetic single-branch fetch refspec retains main only while feature tracking config and published local bare-origin feature both exist."
     }
   ],
   "export_boundary": "Derived qualification contract: all fixtures use disposable Git or mocked APIs; original private source/history/inventories remain outside this distribution."

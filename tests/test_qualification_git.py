@@ -369,6 +369,6 @@ class QualificationGitTests(unittest.TestCase):
         self.assertEqual(matrix["schema_version"], 1)
         ids = [case["id"] for case in matrix["cases"]]
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertEqual(set(ids), {f"GQ{number:02d}" for number in range(1, 20)})
+        self.assertEqual(set(ids), {f"GQ{number:02d}" for number in range(1, 21)})
         self.assertTrue(matrix["constraints"]["no_real_repository_mutations"])
         self.assertTrue(all(case["expected_disposition"] for case in matrix["cases"]))
