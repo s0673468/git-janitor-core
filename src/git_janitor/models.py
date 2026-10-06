@@ -24,6 +24,9 @@ class BranchState:
     ahead: int | None = None
     behind: int | None = None
     upstream_gone: bool = False
+    tracking_configured: bool | None = None
+    tracking_remote: str | None = None
+    tracking_merge: str | None = None
 
 
 @dataclass
@@ -41,6 +44,9 @@ class LinkedWorktreeState:
     errors: list[str] = field(default_factory=list)
     ahead: int = 0
     behind: int = 0
+    tracking_configured: bool | None = None
+    tracking_remote: str | None = None
+    tracking_merge: str | None = None
 
 
 @dataclass
@@ -64,6 +70,9 @@ class RepoState:
     head_oid: str | None = None
     head_unique_commit_count: int | None = None
     default_oid: str | None = None
+    tracking_configured: bool | None = None
+    tracking_remote: str | None = None
+    tracking_merge: str | None = None
 
 
 @dataclass

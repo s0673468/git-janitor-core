@@ -294,7 +294,7 @@ class ClassifyRepoTests(unittest.TestCase):
                     merged_to_default=True,
                     unique_commit_count=0,
                 ),
-                BranchState(name="codex/local-only", unique_commit_count=2),
+                BranchState(name="codex/local-only", unique_commit_count=2, tracking_configured=False),
             ],
         )
 

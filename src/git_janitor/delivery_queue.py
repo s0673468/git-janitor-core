@@ -42,6 +42,10 @@ def build_delivery_queue(report: ScanReport) -> list[QueueItem]:
         for repo_index, repo in enumerate(report.repos):
             if finding.repo_path == repo.path or any(w.path == finding.repo_path for w in repo.linked_worktrees):
                 evidence.append(f"/repos/{repo_index}: HEAD={repo.head_oid or 'unknown'}; default_ref={repo.default_ref or 'unknown'}; default_oid={repo.default_oid or 'unknown'}; fetch={repo.fetch_prune_status or 'not verified'}")
+                evidence.append(f"/repos/{repo_index}: tracking_configured={repo.tracking_configured if repo.tracking_configured is not None else 'unknown'}; local_upstream={repo.upstream or 'unresolved'}")
+                for branch_index, branch in enumerate(repo.branches):
+                    if branch.tracking_configured and (branch.upstream is None or branch.upstream_gone):
+                        evidence.append(f"/repos/{repo_index}/branches/{branch_index}: name={branch.name}; tracking_configured=True; local_upstream={branch.upstream or 'unresolved'}; unique_commit_count={branch.unique_commit_count if branch.unique_commit_count is not None else 'unknown'}")
                 for worktree_index, worktree in enumerate(repo.linked_worktrees):
                     if worktree.path == finding.repo_path:
                         evidence.append(f"/repos/{repo_index}/linked_worktrees/{worktree_index}: HEAD={worktree.head or 'unknown'}; dirty={len(worktree.dirty_files)}; untracked={len(worktree.untracked_files)}; inspection_errors={len(worktree.errors)}")

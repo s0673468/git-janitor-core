@@ -321,6 +321,12 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
     repo.branches = _scan_branches(
         path, default_ref, repo.current_branch, config, errors=repo.errors,
     )
+    for branch_state in repo.branches:
+        if branch_state.current:
+            repo.tracking_configured = branch_state.tracking_configured
+            repo.tracking_remote = branch_state.tracking_remote
+            repo.tracking_merge = branch_state.tracking_merge
+            break
     repo.linked_worktrees, worktree_errors = _scan_linked_worktrees(path, default_ref, config)
     repo.errors.extend(worktree_errors)
     return repo
@@ -344,6 +350,56 @@ def _default_ref(path: Path, config: ScannerConfig) -> str | None:
     if exists.returncode == 0:
         return fallback
     return None
+
+
+def _tracking_configuration(
+    path: Path, branch: str, config: ScannerConfig, errors: list[str],
+) -> tuple[bool | None, str | None, str | None]:
+    """Read configured tracking without inventing an upstream from a remote name."""
+    values: list[str | None] = []
+    present = False
+    failed = False
+    for key in ("remote", "merge"):
+        result = run_command(
+            ["git", "config", "--get", f"branch.{branch}.{key}"],
+            cwd=path, timeout=config.command_timeout_seconds,
+        )
+        if result.returncode == 0:
+            present = True
+            value = result.stdout or None
+            # A branch remote may be a credential-bearing URL rather than a
+            # configured remote name. Config stdout/stderr must not leak it.
+            if value and key == "remote" and not re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*", value):
+                value = "[remote location redacted]"
+            elif value and key == "merge" and not re.fullmatch(r"refs/[A-Za-z0-9_./-]+", value):
+                value = "[merge target redacted]"
+            values.append(value)
+        elif result.returncode == 1:
+            values.append(None)
+        else:
+            failed = True
+            values.append(None)
+            errors.append(
+                f"branch {branch}: tracking configuration {key} inspection failed "
+                f"(exit {result.returncode}); comparison unknown"
+            )
+    return None if failed else present, values[0], values[1]
+
+
+def _tracking_comparison_gap(
+    branch: str, configured: bool | None, upstream: str | None, gone: bool,
+    errors: list[str],
+) -> None:
+    if configured is True and upstream is None:
+        errors.append(
+            f"branch {branch}: tracking configured but local upstream mapping unavailable; "
+            "publication and comparison unknown"
+        )
+    elif gone:
+        errors.append(
+            f"branch {branch}: local upstream ref unavailable ([gone]); "
+            "remote existence, publication and comparison unknown"
+        )
 
 
 def _scan_branches(
@@ -380,6 +436,10 @@ def _scan_branches(
             last_subject=subject or None,
             current=name == current_branch,
         )
+        inspection_errors = errors if errors is not None else []
+        state.tracking_configured, state.tracking_remote, state.tracking_merge = (
+            _tracking_configuration(path, name, config, inspection_errors)
+        )
         if state.upstream:
             exists = run_command(
                 ["git", "show-ref", "--verify", "--quiet", f"refs/remotes/{state.upstream}"],
@@ -411,6 +471,10 @@ def _scan_branches(
                 except ValueError:
                     if errors is not None:
                         errors.append(counts.stderr or f"upstream divergence unavailable for {name}")
+        _tracking_comparison_gap(
+            name, state.tracking_configured, state.upstream, state.upstream_gone,
+            inspection_errors,
+        )
         if default_ref and name != default_ref:
             state.merged_to_default = _is_ancestor(path, name, default_ref, config, errors=errors)
             state.unique_commit_count = _unique_commit_count(path, default_ref, name, config, errors=errors)
@@ -471,6 +535,14 @@ def _inspect_linked_worktree(
     state.ahead = ahead
     state.behind = behind
     state.upstream_gone = status_upstream_gone(status.stdout)
+    if entry.branch:
+        state.tracking_configured, state.tracking_remote, state.tracking_merge = (
+            _tracking_configuration(worktree_path, entry.branch, config, state.errors)
+        )
+        _tracking_comparison_gap(
+            entry.branch, state.tracking_configured, state.upstream,
+            state.upstream_gone, state.errors,
+        )
 
     if not default_ref:
         state.errors.append("default ref unavailable for linked worktree comparison")

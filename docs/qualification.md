@@ -2,7 +2,7 @@
 
 The frozen synthetic matrix is in
 [`tests/fixtures/qualification/matrix.json`](../tests/fixtures/qualification/matrix.json).
-It retains 19 case IDs and their original observable triggers against the
+It retains the original 19 case IDs and their observable triggers against the
 standalone export baseline. Contract changes need explicit justification;
 add probes instead of replacing a failing example.
 
@@ -19,6 +19,28 @@ two linked checkout directories the same. Canonical reconciliation and saved
 plans retain observed spelling and reject genuine duplicate or shared-project
 ambiguity. An alias does not create a false missing checkout; an unavailable
 identity does not establish an alias.
+
+## GQ20: configured tracking and partial fetches
+
+The additive GQ20 case is frozen against public source
+`35fc4e12bf29d4edbbf297478cccea44093135e7`. A single-branch fetch can retain
+`branch.feature.remote` and `branch.feature.merge` while its fetch refspec does
+not map that branch to any local upstream ref. Configured tracking and resolved
+local upstream are separate observations. The scanner never constructs an
+`origin/<branch>` substitute or treats missing local refs as remote deletion.
+
+Current, noncurrent and linked branches retain tracking configuration, unique
+counts and dirty/untracked work. Configured-but-unmapped tracking is a comparison
+coverage gap, rather than a genuinely unconfigured branch. Native `[gone]` means
+the local upstream ref is unavailable; remote existence and publication remain
+unknown. Config inspection failures stay unknown. Error gates block uncertain
+operator decisions, and the queue remains inspection-only. URL-like remote or
+invalid merge locations are redacted rather than exposing credentials.
+
+Additive tracking fields default to unknown when old snapshots or fixture models
+do not record them. Default ahead/behind values without an available upstream
+and complete inspection are not proof of equality or remote publication. Replay
+retains the original source gaps; it does not resolve tracking or fetch refs.
 
 ## Acceptance
 
