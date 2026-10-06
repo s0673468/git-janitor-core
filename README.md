@@ -96,3 +96,12 @@ The export passed 371 offline tests with 16 existing disabled-provider skips,
 Ruff, package installation, and CLI smoke checks. All workflow scripts passed
 actionlint with ShellCheck and Bash syntax validation. Hosted CI runs these
 checks again for each published revision.
+
+## Qualification and evidence
+
+[The frozen qualification matrix](docs/qualification.md) exercises adversarial
+Git and mocked API states with explicit preservation boundaries. Reports expose
+a ranked inspection queue, observed source identities and missing evidence.
+Offline reproduction retains the original snapshot; it never fetches or acts.
+A passing fixture or green PR observation does not grant cleanup or delivery
+authority. Store real reports outside this public checkout.

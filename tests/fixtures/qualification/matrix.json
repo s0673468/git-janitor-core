@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-05",
+  "baseline_commit": "342e64d914ef74e4f66148d1d11df23d5d053c62",
+  "purpose": "Portable scanner qualification with frozen synthetic triggers and explicit preservation boundaries",
+  "constraints": {
+    "no_real_repository_mutations": true,
+    "no_network_fixture_calls": true,
+    "no_execution_engine_application": true,
+    "no_review_requests": true
+  },
+  "cases": [
+    {
+      "id": "GQ01",
+      "input": "Current no-upstream unique commit",
+      "source_kind": "disposable-git",
+      "expected_disposition": "Visible unpublished work; preserve checkout and commits",
+      "preserved_unknowns": "Publication intent and owner authorization",
+      "test_pointer": "tests/test_qualification_git.py::test_GQ01_current_unpublished_branch_is_visible"
+    },
+    {
+      "id": "GQ02",
+      "input": "Detached linked dirty and untracked work",
+      "source_kind": "disposable-git",
+      "expected_disposition": "Visible detached and dirty findings; preserve all files and HEAD",
+      "preserved_unknowns": "Ownership and activity",
+      "test_pointer": "tests/test_qualification_git.py::test_GQ02_detached_linked_work_preserves_dirty_and_untracked"
+    },
+    {
+      "id": "GQ03",
+      "input": "Fetch fails with no stderr",
+      "source_kind": "mocked-command",
+      "expected_disposition": "Incomplete freshness; blocked cleanup and explicit fetch warning",
+      "preserved_unknowns": "Remote currentness",
+      "test_pointer": "tests/test_qualification_git.py::test_GQ03_failed_fetch_without_stderr_is_not_clean"
+    },
+    {
+      "id": "GQ04",
+      "input": "Branch enumeration fails",
+      "source_kind": "mocked-command",
+      "expected_disposition": "Incomplete ref inventory; explicit scanner error",
+      "preserved_unknowns": "Missing branch state",
+      "test_pointer": "tests/test_qualification_git.py::test_GQ04_partial_branch_enumeration_is_incomplete"
+    },
+    {
+      "id": "GQ05",
+      "input": "Local upstream divergence 1 ahead and 1 behind",
+      "source_kind": "disposable-git",
+      "expected_disposition": "Visible divergence and unpublished work; preserve refs",
+      "preserved_unknowns": "Integration choice",
+      "test_pointer": "tests/test_qualification_git.py::test_GQ05_divergence_reports_both_sides_and_preserves_refs"
+    },
+    {
+      "id": "GQ06",
+      "input": "Merged locally but not published to remote default",
+      "source_kind": "disposable-git",
+      "expected_disposition": "Unpublished work; local merge is not remote merge proof",
+      "preserved_unknowns": "Delivery intent",
+      "test_pointer": "tests/test_qualification_git.py::test_GQ06_local_merge_does_not_prove_remote_publication"
+    },
+    {
+      "id": "GQ07",
+      "input": "Dirty linked branch with live upstream",
+      "source_kind": "disposable-git",
+      "expected_disposition": "Visible dirty preservation finding regardless upstream state",
+      "preserved_unknowns": "Owner and active usage",
+      "test_pointer": "tests/test_qualification_git.py::test_GQ07_dirty_linked_live_upstream_is_visible"
+    },
+    {
+      "id": "GQ08",
+      "input": "Partial refs have no authoritative remote default",
+      "source_kind": "disposable-git",
+      "expected_disposition": "Explicit incomplete comparison; null counts remain unknown",
+      "preserved_unknowns": "Remote default and merge proof",
+      "test_pointer": "tests/test_qualification_git.py::test_GQ08_missing_default_ref_preserves_unknown_comparison"
+    },
+    {
+      "id": "GQ09",
+      "input": "Tracked noncurrent branch with unpublished commit",
+      "source_kind": "disposable-git",
+      "expected_disposition": "Visible ahead count and unpublished finding; preserve branch",
+      "preserved_unknowns": "Publication intent",
+      "test_pointer": "tests/test_qualification_git.py::test_GQ09_tracked_noncurrent_unpublished_commits_are_visible"
+    },
+    {
+      "id": "GQ10",
+      "input": "PR head and gate receipt freshness",
+      "source_kind": "mocked-github",
+      "expected_disposition": "Exact PR head retained; stale or missing receipt is not authorization",
+      "preserved_unknowns": "Current exact-head gate and delivery authorization",
+      "test_pointer": "tests/test_qualification_github.py::test_gq10_head_movement_during_enrichment_cannot_look_green"
+    },
+    {
+      "id": "GQ11",
+      "input": "Blocked failing pending or stale checks",
+      "source_kind": "mocked-github",
+      "expected_disposition": "Blocked pending and failure classifications remain explicit",
+      "preserved_unknowns": "Completion timing and repair authority",
+      "test_pointer": "tests/test_classify.py::ClassifyPrTests"
+    },
+    {
+      "id": "GQ12",
+      "input": "Authentication failure",
+      "source_kind": "mocked-github",
+      "expected_disposition": "Incomplete coverage; no missing or clean claims beyond evidence",
+      "preserved_unknowns": "Inaccessible repository inventory",
+      "test_pointer": "tests/test_reconciliation_integration.py::test_authentication_failure_is_partial_and_never_claims_clean"
+    },
+    {
+      "id": "GQ13",
+      "input": "Malformed PR response shape or row",
+      "source_kind": "mocked-github",
+      "expected_disposition": "Explicit incomplete parse evidence; preserve valid observations",
+      "preserved_unknowns": "Unavailable malformed rows",
+      "test_pointer": "tests/test_qualification_github.py::test_gq13_malformed_response_is_incomplete_not_empty_or_crash"
+    },
+    {
+      "id": "GQ14",
+      "input": "Ambiguous registry ownership and paths",
+      "source_kind": "fixture-model",
+      "expected_disposition": "Preserve ambiguity; no cleanup or remapping authorized",
+      "preserved_unknowns": "Identity and owner",
+      "test_pointer": "tests/test_scan_plans.py::test_project_selection_rejects_ambiguous_discovered_or_registry_paths"
+    },
+    {
+      "id": "GQ15",
+      "input": "Repeatable report and actionable uncertainty",
+      "source_kind": "fixture-report",
+      "expected_disposition": "Same frozen input reproduces output; preserve unknowns and authority boundaries",
+      "preserved_unknowns": "Unverified receipts and unavailable sources",
+      "test_pointer": "tests/test_delivery_queue.py::test_gq15_reports_reproduce_without_mutating_input"
+    },
+    {
+      "id": "GQ16",
+      "input": "Physical checkout aliases, distinct linked worktrees, case-sensitive paths, and inaccessible identities",
+      "source_kind": "disposable-git-and-mocked-filesystem",
+      "expected_disposition": "Deduplicate proved physical checkout aliases and exclude current aliases from linked results; preserve distinct linked checkouts and unknown identities",
+      "preserved_unknowns": "Inaccessible physical identity, missing paths, ownership, and activity",
+      "test_pointer": "tests/test_qualification_git.py::test_GQ16_case_aliases_dedupe_physical_checkout",
+      "addendum_baseline_commit": "342e64d914ef74e4f66148d1d11df23d5d053c62",
+      "evidence": "Confirmed against standalone export baseline; synthetic regression and owning-platform identity probes preserve the original trigger. Private source evidence is retained outside the distribution."
+    },
+    {
+      "id": "GQ17",
+      "input": "GitHub dedicated dependency actor serialized as app/dependabot or dependabot[bot], plus human bot-like branch name",
+      "source_kind": "mocked-github",
+      "expected_disposition": "Bot remains visible to all-author inspection but excluded from authored action/enrichment surface; human branch name does not establish bot ownership",
+      "preserved_unknowns": "Human task ownership and unrelated delivery authorization",
+      "test_pointer": "tests/test_qualification_github.py::test_gq17_dependency_actor_alias_stays_visible_but_not_actionable",
+      "addendum_baseline_commit": "342e64d914ef74e4f66148d1d11df23d5d053c62",
+      "evidence": "Confirmed against standalone export baseline; synthetic regression and owning-platform identity probes preserve the original trigger. Private source evidence is retained outside the distribution."
+    },
+    {
+      "id": "GQ18",
+      "input": "Canonical registered checkout observed under physically identical casing alias, with distinct or unavailable identity controls",
+      "source_kind": "mocked-filesystem-and-registry-model",
+      "expected_disposition": "Recognize proven existing canonical checkout without false missing/path-mismatch findings; preserve original observed spelling and separate distinct or unknown identity",
+      "preserved_unknowns": "Unavailable identity, actual missing checkout, ownership and activity",
+      "test_pointer": "tests/test_reconciliation.py::test_GQ18_physical_alias_is_canonical_checkout",
+      "addendum_baseline_commit": "342e64d914ef74e4f66148d1d11df23d5d053c62",
+      "evidence": "Confirmed against standalone export baseline; synthetic regression and owning-platform identity probes preserve the original trigger. Private source evidence is retained outside the distribution."
+    },
+    {
+      "id": "GQ19",
+      "input": "Saved project plan maps canonical registered path to proved same physical discovered casing alias, with genuine ambiguity controls",
+      "source_kind": "mocked-filesystem-and-saved-plan",
+      "expected_disposition": "Select exact observed discovered path when physical identity is proved; reject genuine duplicate discovery or shared project ownership; never force casefold missing or distinct paths",
+      "preserved_unknowns": "Unavailable identity and unresolved project scope",
+      "test_pointer": "tests/test_scan_plans.py::test_GQ19_physical_alias_selects_discovered_checkout",
+      "addendum_baseline_commit": "342e64d914ef74e4f66148d1d11df23d5d053c62",
+      "evidence": "Confirmed against standalone export baseline; synthetic regression and owning-platform identity probes preserve the original trigger. Private source evidence is retained outside the distribution."
+    }
+  ],
+  "export_boundary": "Derived qualification contract: all fixtures use disposable Git or mocked APIs; original private source/history/inventories remain outside this distribution."
+}

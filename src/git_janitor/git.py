@@ -85,9 +85,36 @@ def discover_repos(
     errors: list[str] | None = None,
 ) -> list[Path]:
     found: dict[str, Path] = {}
+    physical_checkouts: set[tuple[int, int]] = set()
+
+    def register_checkout(path: Path) -> None:
+        try:
+            resolved = path.resolve()
+        except (OSError, RuntimeError) as exc:
+            resolved = path.absolute()
+            if errors is not None:
+                errors.append(f"could not resolve checkout path {path}: {exc}")
+        try:
+            checkout_stat = resolved.stat()
+            # Directory identity distinguishes linked checkouts even though
+            # they share a Git common directory. Do not case-fold names: they
+            # can denote distinct directories on a case-sensitive filesystem.
+            if checkout_stat.st_ino:
+                identity = (checkout_stat.st_dev, checkout_stat.st_ino)
+                if identity in physical_checkouts:
+                    return
+                physical_checkouts.add(identity)
+            elif errors is not None:
+                errors.append(f"checkout identity unavailable for {path}: filesystem inode unknown")
+        except OSError as exc:
+            if errors is not None:
+                errors.append(f"checkout identity unavailable for {path}: {exc}")
+        # Unknown physical identity preserves each distinct path spelling.
+        found[str(resolved)] = resolved
+
     for repo in config.repos:
         if (repo / ".git").exists():
-            found[str(repo.resolve())] = repo.resolve()
+            register_checkout(repo)
         elif errors is not None:
             errors.append(f"configured repository is missing or not a Git checkout: {repo}")
 
@@ -106,7 +133,7 @@ def discover_repos(
             config.exclude_dirs,
             errors=errors,
         ):
-            found[str(path)] = path
+            register_checkout(path)
 
     return [found[key] for key in sorted(found)]
 
@@ -219,7 +246,12 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
             cwd=path,
             timeout=config.command_timeout_seconds,
         )
-        repo.fetch_prune_status = "ok" if fetch.returncode == 0 else fetch.stderr
+        repo.fetch_prune_status = (
+            "ok" if fetch.returncode == 0
+            else fetch.stderr or fetch.stdout or f"git fetch failed (exit {fetch.returncode})"
+        )
+        if fetch.returncode != 0:
+            repo.errors.append(f"remote freshness unproved: {repo.fetch_prune_status}")
 
     remote = run_command(
         ["git", "remote", "get-url", "origin"],
@@ -237,10 +269,39 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
     )
     if branch.returncode == 0:
         repo.current_branch = branch.stdout
+    else:
+        repo.errors.append(branch.stderr or "failed to identify current branch")
+
+    head = run_command(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=path,
+        timeout=config.command_timeout_seconds,
+    )
+    if head.returncode == 0:
+        repo.head_oid = head.stdout
+    else:
+        repo.errors.append(head.stderr or "failed to identify checkout HEAD")
 
     default_ref = _default_ref(path, config)
+    if default_ref:
+        default_head = run_command(
+            ["git", "rev-parse", "--verify", default_ref],
+            cwd=path,
+            timeout=config.command_timeout_seconds,
+        )
+        if default_head.returncode == 0:
+            repo.default_oid = default_head.stdout
+        else:
+            repo.errors.append(default_head.stderr or f"failed to verify remote default ref {default_ref}")
+            default_ref = None
     repo.default_ref = default_ref
-    repo.default_branch = default_ref.rsplit("/", 1)[-1] if default_ref else config.default_branch
+    repo.default_branch = default_ref.removeprefix("origin/") if default_ref else config.default_branch
+    if default_ref is None:
+        repo.errors.append("remote default ref unavailable; merge and unique-commit comparisons unknown")
+    elif repo.head_oid:
+        repo.head_unique_commit_count = _unique_commit_count(
+            path, repo.default_oid or default_ref, repo.head_oid, config, errors=repo.errors,
+        )
 
     status = run_command(
         ["git", "status", "--porcelain=v1", "--branch", "--untracked-files=normal"],
@@ -257,7 +318,9 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
     else:
         repo.errors.append(status.stderr or "failed to read git status")
 
-    repo.branches = _scan_branches(path, default_ref, repo.current_branch, config)
+    repo.branches = _scan_branches(
+        path, default_ref, repo.current_branch, config, errors=repo.errors,
+    )
     repo.linked_worktrees, worktree_errors = _scan_linked_worktrees(path, default_ref, config)
     repo.errors.extend(worktree_errors)
     return repo
@@ -288,6 +351,8 @@ def _scan_branches(
     default_ref: str | None,
     current_branch: str | None,
     config: ScannerConfig,
+    *,
+    errors: list[str] | None = None,
 ) -> list[BranchState]:
     branches_raw = run_command(
         [
@@ -300,7 +365,10 @@ def _scan_branches(
         timeout=config.command_timeout_seconds,
     )
     if branches_raw.returncode != 0:
-        return []
+        if errors is not None:
+            errors.append(branches_raw.stderr or "failed to enumerate local branches")
+        if not branches_raw.stdout:
+            return []
 
     branches: list[BranchState] = []
     for line in branches_raw.stdout.splitlines():
@@ -312,9 +380,40 @@ def _scan_branches(
             last_subject=subject or None,
             current=name == current_branch,
         )
+        if state.upstream:
+            exists = run_command(
+                ["git", "show-ref", "--verify", "--quiet", f"refs/remotes/{state.upstream}"],
+                cwd=path,
+                timeout=config.command_timeout_seconds,
+            )
+            # Local upstreams are also valid Git configurations.
+            if exists.returncode != 0:
+                exists = run_command(
+                    ["git", "rev-parse", "--verify", "--quiet", state.upstream],
+                    cwd=path,
+                    timeout=config.command_timeout_seconds,
+                )
+            if exists.returncode == 1:
+                state.upstream_gone = True
+            elif exists.returncode != 0:
+                if errors is not None:
+                    errors.append(exists.stderr or f"failed to inspect upstream for {name}")
+            else:
+                counts = run_command(
+                    ["git", "rev-list", "--left-right", "--count", f"{state.upstream}...{name}"],
+                    cwd=path,
+                    timeout=config.command_timeout_seconds,
+                )
+                try:
+                    if counts.returncode != 0:
+                        raise ValueError
+                    state.behind, state.ahead = (int(part) for part in counts.stdout.split())
+                except ValueError:
+                    if errors is not None:
+                        errors.append(counts.stderr or f"upstream divergence unavailable for {name}")
         if default_ref and name != default_ref:
-            state.merged_to_default = _is_ancestor(path, name, default_ref, config)
-            state.unique_commit_count = _unique_commit_count(path, default_ref, name, config)
+            state.merged_to_default = _is_ancestor(path, name, default_ref, config, errors=errors)
+            state.unique_commit_count = _unique_commit_count(path, default_ref, name, config, errors=errors)
         branches.append(state)
     return branches
 
@@ -356,9 +455,6 @@ def _inspect_linked_worktree(
         head=entry.head,
         default_ref=default_ref,
     )
-    if not entry.branch:
-        return state
-
     status = run_command(
         ["git", "status", "--porcelain=v1", "--branch", "--untracked-files=normal"],
         cwd=worktree_path,
@@ -368,16 +464,16 @@ def _inspect_linked_worktree(
         state.errors.append(status.stderr or "failed to read linked worktree status")
         return state
 
-    dirty, untracked, _ahead, _behind, upstream = parse_status_porcelain(status.stdout)
+    dirty, untracked, ahead, behind, upstream = parse_status_porcelain(status.stdout)
     state.dirty_files = dirty
     state.untracked_files = untracked
     state.upstream = upstream
+    state.ahead = ahead
+    state.behind = behind
     state.upstream_gone = status_upstream_gone(status.stdout)
-    if not state.upstream_gone:
-        return state
 
     if not default_ref:
-        state.errors.append("default ref unavailable for linked worktree diff")
+        state.errors.append("default ref unavailable for linked worktree comparison")
         return state
 
     tree_diff = run_command(
@@ -392,16 +488,23 @@ def _inspect_linked_worktree(
     else:
         state.errors.append(tree_diff.stderr or "failed to compare linked worktree tree")
 
-    state.unique_commit_count = _unique_commit_count(worktree_path, default_ref, "HEAD", config)
+    state.unique_commit_count = _unique_commit_count(
+        worktree_path, default_ref, "HEAD", config, errors=state.errors,
+    )
     return state
 
 
-def _is_ancestor(path: Path, branch: str, default_ref: str, config: ScannerConfig) -> bool:
+def _is_ancestor(
+    path: Path, branch: str, default_ref: str, config: ScannerConfig,
+    *, errors: list[str] | None = None,
+) -> bool:
     result = run_command(
         ["git", "merge-base", "--is-ancestor", branch, default_ref],
         cwd=path,
         timeout=config.command_timeout_seconds,
     )
+    if result.returncode not in (0, 1) and errors is not None:
+        errors.append(result.stderr or f"merge proof unavailable for {branch}")
     return result.returncode == 0
 
 
@@ -410,6 +513,8 @@ def _unique_commit_count(
     default_ref: str,
     branch: str,
     config: ScannerConfig,
+    *,
+    errors: list[str] | None = None,
 ) -> int | None:
     result = run_command(
         ["git", "cherry", "-v", default_ref, branch],
@@ -417,6 +522,8 @@ def _unique_commit_count(
         timeout=config.command_timeout_seconds,
     )
     if result.returncode != 0:
+        if errors is not None:
+            errors.append(result.stderr or f"unique-commit comparison unavailable for {branch}")
         return None
     return sum(1 for line in result.stdout.splitlines() if line.startswith("+"))
 
@@ -435,6 +542,14 @@ def _short_branch_name(ref: str) -> str:
 
 def _same_path(left: Path, right: Path) -> bool:
     try:
-        return left.resolve() == right.resolve()
+        left_stat, right_stat = left.stat(), right.stat()
+        if left_stat.st_ino and right_stat.st_ino:
+            return (left_stat.st_dev, left_stat.st_ino) == (right_stat.st_dev, right_stat.st_ino)
     except OSError:
+        pass
+    # Missing or inaccessible identity is not proof that casing variants
+    # alias. Retain the prior lexical fallback without case normalization.
+    try:
+        return left.resolve() == right.resolve()
+    except (OSError, RuntimeError):
         return str(left) == str(right)

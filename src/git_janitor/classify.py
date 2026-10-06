@@ -76,7 +76,7 @@ def classify_repo(
                 title=f"{repo.name}: local worktree has uncommitted changes",
                 detail=f"{dirty_count} modified/staged files, {untracked_count} untracked files.",
                 repo_path=repo.path,
-                recommended_action="Review and either commit, stash, or delete intentionally.",
+                recommended_action="Preserve local changes; confirm ownership and intent before committing or moving them.",
             )
         )
 
@@ -88,20 +88,81 @@ def classify_repo(
                 title=f"{repo.name}: current branch is ahead of upstream",
                 detail=f"{repo.current_branch or 'current branch'} is ahead by {repo.ahead} commit(s).",
                 repo_path=repo.path,
-                recommended_action="Push, open a PR, or decide that the commits should stay local.",
+                recommended_action="Preserve the commits; confirm ownership and existing delivery authority before publishing.",
             )
         )
 
+    if repo.ahead and repo.behind:
+        findings.append(_divergence_finding(
+            repo.path, repo.name, repo.current_branch or "current branch", repo.ahead, repo.behind,
+        ))
+
+    current_upstream_gone = any(branch.current and branch.upstream_gone for branch in repo.branches)
+    if repo.current_branch == "HEAD":
+        findings.append(_detached_finding(repo.path, repo.name, repo.head_oid, repo.head_unique_commit_count))
+    elif (repo.upstream is None or current_upstream_gone) and repo.head_unique_commit_count:
+        findings.append(_unpublished_finding(
+            repo.path, repo.name, repo.current_branch or "current branch",
+            repo.head_unique_commit_count, repo.default_ref or repo.default_branch,
+            upstream_gone=current_upstream_gone,
+        ))
+
     for worktree in repo.linked_worktrees:
+        branch_label = worktree.branch or "detached HEAD"
+        if worktree.dirty_files or worktree.untracked_files:
+            findings.append(Finding(
+                severity="high",
+                category="dirty-worktree",
+                title=f"{repo.name}: linked worktree {branch_label} has uncommitted changes",
+                detail=(f"{len(worktree.dirty_files)} modified/staged files, "
+                        f"{len(worktree.untracked_files)} untracked files at {worktree.path}."),
+                repo_path=worktree.path,
+                recommended_action="Preserve this worktree and its files; confirm ownership and activity before delivery or cleanup.",
+            ))
+        if worktree.branch is None:
+            findings.append(_detached_finding(
+                worktree.path, repo.name, worktree.head, worktree.unique_commit_count,
+            ))
+        elif (worktree.upstream is None or worktree.upstream_gone) and worktree.unique_commit_count:
+            findings.append(_unpublished_finding(
+                worktree.path, repo.name, worktree.branch, worktree.unique_commit_count,
+                worktree.default_ref or repo.default_ref or repo.default_branch,
+                upstream_gone=worktree.upstream_gone,
+            ))
+        if worktree.ahead:
+            findings.append(Finding(
+                severity="high", category="unpushed-commits",
+                title=f"{repo.name}: linked worktree {branch_label} is ahead of upstream",
+                detail=f"{branch_label} is ahead by {worktree.ahead} commit(s) at {worktree.path}.",
+                repo_path=worktree.path,
+                recommended_action="Preserve the commits; confirm task ownership and delivery authorization before publishing.",
+            ))
+        if worktree.ahead and worktree.behind:
+            findings.append(_divergence_finding(
+                worktree.path, repo.name, branch_label, worktree.ahead, worktree.behind,
+            ))
         if worktree.upstream_gone:
             findings.append(_classify_stale_linked_worktree(repo, worktree))
 
+    linked_branch_names = {worktree.branch for worktree in repo.linked_worktrees}
     for branch in repo.branches:
         if branch.current:
             continue
+        if branch.ahead and branch.name not in linked_branch_names:
+            findings.append(Finding(
+                severity="high", category="unpushed-commits",
+                title=f"{repo.name}: local branch {branch.name} is ahead of upstream",
+                detail=f"{branch.name} is ahead by {branch.ahead} commit(s) of {branch.upstream}.",
+                repo_path=repo.path,
+                recommended_action="Preserve the commits; confirm task ownership and delivery authorization before publishing.",
+            ))
+            if branch.behind:
+                findings.append(_divergence_finding(
+                    repo.path, repo.name, branch.name, branch.ahead, branch.behind,
+                ))
         if branch.name == repo.default_branch:
             continue
-        if branch.merged_to_default and (branch.unique_commit_count in (0, None)):
+        if branch.merged_to_default and branch.unique_commit_count == 0 and not repo.errors:
             findings.append(
                 Finding(
                     severity="low",
@@ -109,18 +170,15 @@ def classify_repo(
                     title=f"{repo.name}: local branch {branch.name} appears merged",
                     detail=f"{branch.name} is an ancestor of {repo.default_ref or repo.default_branch}.",
                     repo_path=repo.path,
-                    recommended_action="Safe cleanup candidate after confirming no active work depends on it.",
+                    recommended_action="Preserve until current merge, publication, inactivity and ownership proof are complete; ancestry alone does not authorize cleanup.",
                 )
             )
-        elif branch.upstream is None and branch.unique_commit_count:
+        elif (branch.upstream is None or branch.upstream_gone) and branch.unique_commit_count and branch.name not in linked_branch_names:
             findings.append(
-                Finding(
-                    severity="medium",
-                    category="branch-without-upstream",
-                    title=f"{repo.name}: local branch {branch.name} has no upstream",
-                    detail=f"{branch.name} has {branch.unique_commit_count} unique commit(s) versus {repo.default_ref or repo.default_branch}.",
-                    repo_path=repo.path,
-                    recommended_action="Push/open a PR if this work still matters; otherwise inspect before deleting.",
+                _unpublished_finding(
+                    repo.path, repo.name, branch.name, branch.unique_commit_count,
+                    repo.default_ref or repo.default_branch,
+                    upstream_gone=branch.upstream_gone,
                 )
             )
 
@@ -136,6 +194,40 @@ def classify_repo(
             )
         )
     return findings
+
+
+def _unpublished_finding(
+    path: str, name: str, branch: str, unique: int, base: str,
+    *, upstream_gone: bool = False,
+) -> Finding:
+    upstream_state = "gone upstream" if upstream_gone else "no upstream"
+    return Finding(
+        severity="medium", category="branch-without-upstream",
+        title=f"{name}: local branch {branch} has {upstream_state}",
+        detail=f"{branch} has {unique} unique commit(s) versus {base} and {upstream_state}.",
+        repo_path=path,
+        recommended_action="Preserve the commits; confirm task ownership and intent before publishing or changing the branch.",
+    )
+
+
+def _detached_finding(path: str, name: str, head: str | None, unique: int | None) -> Finding:
+    return Finding(
+        severity="high" if unique else "medium", category="detached-worktree",
+        title=f"{name}: checkout has detached HEAD",
+        detail=f"HEAD={head or 'unknown'}; unique_commit_count={unique if unique is not None else 'unknown'}; path={path}.",
+        repo_path=path,
+        recommended_action="Preserve HEAD and all local work; confirm ownership before attaching a branch or considering cleanup.",
+    )
+
+
+def _divergence_finding(path: str, name: str, branch: str, ahead: int, behind: int) -> Finding:
+    return Finding(
+        severity="high", category="diverged-upstream",
+        title=f"{name}: {branch} diverged from upstream",
+        detail=f"{branch} is ahead by {ahead} and behind by {behind} commit(s).",
+        repo_path=path,
+        recommended_action="Preserve both histories; determine ownership and integrate only within an authorized delivery task.",
+    )
 
 
 def _classify_stale_linked_worktree(
@@ -197,6 +289,7 @@ def classify_pr(pr: PullRequestState, config: ScannerConfig) -> list[Finding]:
                 recommended_action="Open the PR if the classification seems ambiguous.",
             )
         )
+        return findings
 
     if pr.check_status == "stale":
         findings.append(

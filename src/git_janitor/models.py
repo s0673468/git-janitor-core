@@ -21,6 +21,9 @@ class BranchState:
     merged_to_default: bool = False
     unique_commit_count: int | None = None
     current: bool = False
+    ahead: int | None = None
+    behind: int | None = None
+    upstream_gone: bool = False
 
 
 @dataclass
@@ -36,6 +39,8 @@ class LinkedWorktreeState:
     dirty_files: list[str] = field(default_factory=list)
     untracked_files: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    ahead: int = 0
+    behind: int = 0
 
 
 @dataclass
@@ -56,6 +61,9 @@ class RepoState:
     linked_worktrees: list[LinkedWorktreeState] = field(default_factory=list)
     fetch_prune_status: str | None = None
     errors: list[str] = field(default_factory=list)
+    head_oid: str | None = None
+    head_unique_commit_count: int | None = None
+    default_oid: str | None = None
 
 
 @dataclass
@@ -76,6 +84,8 @@ class PullRequestState:
     updated_at: str | None = None
     risk_reasons: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    head_oid: str | None = None
+    author: str | None = None
 
 
 @dataclass

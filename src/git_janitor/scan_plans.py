@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
+from .git import _same_path
 from .models import Finding
 
 
@@ -19,6 +20,8 @@ FINDING_CATEGORIES = frozenset(
     {
         "branch-without-upstream",
         "dirty-worktree",
+        "detached-worktree",
+        "diverged-upstream",
         "fetch-prune-failed",
         "green-draft-pr",
         "green-high-risk-pr",
@@ -130,7 +133,8 @@ def select_project_paths(
                 f"saved scan plan {plan.name!r} project {project_id!r} has no canonical local path"
             )
         path = _canonical_path(raw_path, label=f"project {project_id!r}")
-        matches = discovered_counts.get(path, 0)
+        matching_paths = [candidate for candidate in discovered_counts if _same_path(path, candidate)]
+        matches = sum(discovered_counts[candidate] for candidate in matching_paths)
         if matches == 0:
             raise ScanPlanError(
                 f"saved scan plan {plan.name!r} project {project_id!r} is not in the "
@@ -141,13 +145,14 @@ def select_project_paths(
                 f"saved scan plan {plan.name!r} project {project_id!r} has an ambiguous "
                 "discovered path"
             )
-        if prior_project := selected_by_path.get(path):
+        discovered_path = matching_paths[0]
+        if prior_project := selected_by_path.get(discovered_path):
             raise ScanPlanError(
                 f"saved scan plan {plan.name!r} has ambiguous canonical path shared by "
                 f"{prior_project!r} and {project_id!r}"
             )
-        selected_by_path[path] = project_id
-        selected.append(path)
+        selected_by_path[discovered_path] = project_id
+        selected.append(discovered_path)
     return selected
 
 

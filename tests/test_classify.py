@@ -113,14 +113,14 @@ class ClassifyPrTests(unittest.TestCase):
 
         self.assertEqual(findings[0].category, "green-draft-pr")
 
-    def test_pr_errors_are_preserved_with_green_classification(self) -> None:
+    def test_pr_errors_block_green_classification(self) -> None:
         pr = self._pr(errors=["files unavailable", "checks partial"])
 
         findings = classify_pr(pr, ScannerConfig())
 
         self.assertEqual(
             [finding.category for finding in findings],
-            ["pr-inspection-warning", "green-mergeable-pr"],
+            ["pr-inspection-warning"],
         )
         self.assertEqual(findings[0].severity, "medium")
         self.assertEqual(findings[0].detail, "files unavailable; checks partial")
@@ -395,14 +395,15 @@ class ClassifyRepoTests(unittest.TestCase):
 
         findings = classify_repo(repo, ScannerConfig(), datetime.now(timezone.utc))
 
-        self.assertEqual(findings[0].severity, "medium")
+        stale = next(finding for finding in findings if finding.category == "stale-linked-worktree")
+        self.assertEqual(stale.severity, "medium")
         self.assertIn(
             "unknown branch tracks unknown upstream [gone]",
-            findings[0].detail,
+            stale.detail,
         )
-        self.assertIn("tree_matches_origin/trunk=None", findings[0].detail)
-        self.assertIn("Inspection errors: diff failed.", findings[0].detail)
-        self.assertEqual(findings[0].repo_path, "/tmp/repo-old")
+        self.assertIn("tree_matches_origin/trunk=None", stale.detail)
+        self.assertIn("Inspection errors: diff failed.", stale.detail)
+        self.assertEqual(stale.repo_path, "/tmp/repo-old")
 
     def test_stale_linked_worktree_exact_conditions_are_all_required(self) -> None:
         base_values = {
@@ -443,8 +444,8 @@ class ClassifyRepoTests(unittest.TestCase):
                 if override == {"upstream_gone": False}:
                     self.assertEqual(findings, [])
                 else:
-                    self.assertEqual(findings[0].category, "stale-linked-worktree")
-                    self.assertEqual(findings[0].severity, "medium")
+                    stale = next(finding for finding in findings if finding.category == "stale-linked-worktree")
+                    self.assertEqual(stale.severity, "medium")
 
 
 class ClassifyReportTests(unittest.TestCase):
