@@ -5,9 +5,11 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from git_janitor.models import CommandResult, LinkedWorktreeState, RepoState
 from git_janitor.reconciliation import (
@@ -357,6 +359,90 @@ class ReconciliationTests(unittest.TestCase):
         self.assertNotIn("missing-canonical-checkout", alpha.categories)
         self.assertNotIn("canonical-path-mismatch", alpha.categories)
 
+    def test_GQ18_physical_alias_is_canonical_checkout(self) -> None:
+        for linked in (False, True):
+            with self.subTest(linked=linked), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                canonical = root / "Alpha"
+                (canonical / ".git").mkdir(parents=True)
+                alias = root / "alpha"
+                payload = _registry_payload()
+                payload["code_root"] = tmp
+                registry = _loaded_registry(payload)
+                github = _github_inventory({"owner": (), "personal": ()})
+                observed = root / "primary" if linked else alias
+                repo = RepoState(
+                    path=str(observed),
+                    name="Alpha",
+                    github_repo="owner/alpha",
+                    linked_worktrees=[LinkedWorktreeState(path=str(alias))] if linked else [],
+                )
+
+                with _mapped_directory_identity(alias, canonical):
+                    self.assertTrue(canonical.samefile(alias))
+                    self.assertNotEqual(canonical.resolve(), alias.resolve())
+                    result = reconcile_inventory(registry, github, [repo], clock=_fixed_clock)
+
+                alpha = next(row for row in result.rows if row.project_id == "alpha")
+                self.assertTrue(alpha.canonical_checkout_present)
+                self.assertNotIn("missing-canonical-checkout", alpha.categories)
+                self.assertNotIn("canonical-path-mismatch", alpha.categories)
+                self.assertEqual(alpha.local_paths, (str(observed),))
+                self.assertEqual(alpha.worktree_paths, (str(alias),) if linked else ())
+
+    def test_GQ18_distinct_checkout_sharing_git_store_is_not_a_path_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            canonical = root / "Alpha"
+            (canonical / ".git").mkdir(parents=True)
+            other = root / "other-checkout"
+            other.mkdir()
+            (other / ".git").write_text(f"gitdir: {canonical / '.git'}\n", encoding="utf-8")
+            alias = root / "alpha"
+            payload = _registry_payload()
+            payload["code_root"] = tmp
+            registry = _loaded_registry(payload)
+            github = _github_inventory({"owner": (), "personal": ()})
+            repos = [
+                RepoState(path=str(path), name=path.name, github_repo="owner/alpha")
+                for path in (canonical, alias)
+            ]
+
+            with _mapped_directory_identity(alias, other):
+                self.assertFalse(canonical.samefile(alias))
+                result = reconcile_inventory(registry, github, repos, clock=_fixed_clock)
+
+        alpha = next(row for row in result.rows if row.project_id == "alpha")
+        self.assertTrue(alpha.canonical_checkout_present)
+        self.assertIn("canonical-path-mismatch", alpha.categories)
+        self.assertEqual(set(alpha.local_paths), {str(canonical), str(alias)})
+        self.assertEqual(len(result.local.repositories), 2)
+
+    def test_GQ18_inaccessible_alias_identity_is_not_canonical_proof(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            canonical = root / "Alpha"
+            canonical.mkdir()
+            alias = root / "alpha"
+            payload = _registry_payload()
+            payload["code_root"] = tmp
+            registry = _loaded_registry(payload)
+            github = _github_inventory({"owner": (), "personal": ()})
+            repo = RepoState(path=str(alias), name="alpha", github_repo="owner/alpha")
+
+            with _mapped_directory_identity(alias, canonical, inaccessible=True):
+                result = reconcile_inventory(
+                    registry, github, [repo], local_complete=False,
+                    local_errors=("fixture checkout identity unavailable",), clock=_fixed_clock,
+                )
+
+        alpha = next(row for row in result.rows if row.project_id == "alpha")
+        self.assertFalse(alpha.canonical_checkout_present)
+        self.assertNotIn("missing-canonical-checkout", alpha.categories)
+        self.assertFalse(result.complete)
+        self.assertIn("fixture checkout identity unavailable", result.local.errors)
+        self.assertEqual(alpha.local_paths, (str(alias),))
+
     def test_prunable_linked_worktree_is_not_canonical_checkout_proof(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             payload = _registry_payload()
@@ -466,6 +552,22 @@ def _project(
         "truth_store": "repository",
         "validation": validation,
     }
+
+
+def _mapped_directory_identity(alias: Path, target: Path, *, inaccessible: bool = False):
+    """Portable APFS alias model: native identity agrees while spellings differ."""
+    native_stat = os.stat
+
+    def fixture_stat(path, *args, **kwargs):
+        if isinstance(path, (str, bytes, os.PathLike)):
+            candidate = Path(os.fsdecode(path))
+            if candidate == alias or alias in candidate.parents:
+                if inaccessible and candidate == alias:
+                    raise PermissionError("fixture checkout identity unavailable")
+                path = target / candidate.relative_to(alias)
+        return native_stat(path, *args, **kwargs)
+
+    return patch("os.stat", side_effect=fixture_stat)
 
 
 def _loaded_registry(payload: dict | None = None):

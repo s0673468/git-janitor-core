@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import asdict
 from datetime import datetime
 import json
 
 from .models import Finding, ScanReport
+from .delivery_queue import build_delivery_queue
 
 
 def render_markdown(report: ScanReport) -> str:
@@ -28,6 +30,21 @@ def render_markdown(report: ScanReport) -> str:
         lines.extend(["## Scanner Errors", ""])
         for error in report.errors:
             lines.append(f"- {error}")
+        lines.append("")
+
+    queue = build_delivery_queue(report)
+    if queue:
+        lines.extend(["## Ranked Delivery and Hygiene Queue", "", "This queue is inspection-only. Existing explicit task authority must be verified before action; unknown ownership and publication are preserved.", ""])
+        for item in queue:
+            lines.extend([
+                f"{item.rank}. {item.title}",
+                f"   - Lane/status: `{item.lane}` / `{item.status}`; ID `{item.item_id}`.",
+                f"   - Next: {item.next_action}",
+                f"   - Authority: {item.authorization}",
+                f"   - Preserve: {item.preservation}",
+                f"   - Unknown: {'; '.join(item.unknowns)}.",
+                f"   - Evidence ({item.observed_at}): {'; '.join(item.evidence)}",
+            ])
         lines.append("")
 
     if not report.findings:
@@ -70,7 +87,9 @@ def render_markdown(report: ScanReport) -> str:
 
 
 def render_json(report: ScanReport) -> str:
-    return json.dumps(report.to_dict(), indent=2, sort_keys=True)
+    payload = report.to_dict()
+    payload["delivery_queue"] = [asdict(item) for item in build_delivery_queue(report)]
+    return json.dumps(payload, indent=2, sort_keys=True)
 
 
 def report_timestamp() -> str:

@@ -189,7 +189,7 @@ def main(
     discovery_errors: list[str] = []
     repo_paths = discover_repos(
         config,
-        errors=discovery_errors if (plan or args.reconcile_inventory) else None,
+        errors=discovery_errors,
     )
     if plan:
         try:
@@ -200,7 +200,7 @@ def main(
             )
         except ScanPlanError as exc:
             parser.error(str(exc))
-        errors.extend(f"local discovery: {error}" for error in discovery_errors)
+    errors.extend(f"local discovery: {error}" for error in discovery_errors)
     for path in repo_paths:
         repo = scan_repo(path, config)
         repos.append(repo)
@@ -355,7 +355,7 @@ def main(
         _write_text(Path(args.json_out), render_json(report) + "\n")
     if reconciliation is not None and not reconciliation.complete:
         return 3
-    if plan is not None and (
+    if (
         errors
         or any(
             finding.category in EVIDENCE_GAP_FINDING_CATEGORIES

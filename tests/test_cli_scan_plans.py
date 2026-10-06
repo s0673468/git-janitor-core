@@ -101,11 +101,11 @@ class SavedScanPlanCliTests(unittest.TestCase):
                 f"- Finding categories: {tick}merged-local-branch{tick}",
                 markdown,
             )
-            self.assertIn(f"Category: {tick}merged-local-branch{tick}", markdown)
+            self.assertNotIn(f"Category: {tick}merged-local-branch{tick}", markdown)
             self.assertIn(f"Category: {tick}scanner-error{tick}", markdown)
             self.assertIn(f"Category: {tick}fetch-prune-failed{tick}", markdown)
             self.assertIn(f"Category: {tick}pr-inspection-warning{tick}", markdown)
-            self.assertIn(f"Category: {tick}pr-stale-ci{tick}", markdown)
+            self.assertNotIn(f"Category: {tick}pr-stale-ci{tick}", markdown)
             self.assertNotIn(f"Category: {tick}dirty-worktree{tick}", markdown)
 
             payload = json.loads(json_path.read_text(encoding="utf-8"))
@@ -123,9 +123,7 @@ class SavedScanPlanCliTests(unittest.TestCase):
                 {finding["category"] for finding in payload["findings"]},
                 {
                     "fetch-prune-failed",
-                    "merged-local-branch",
                     "pr-inspection-warning",
-                    "pr-stale-ci",
                     "scanner-error",
                 },
             )

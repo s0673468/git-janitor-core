@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 import re
 from typing import Any, Callable
 
-from .git import run_command
+from .git import _same_path, run_command
 from .models import CommandResult, Finding, RepoState
 from .repo_facts import list_repo_meta
 
@@ -387,15 +387,14 @@ def reconcile_inventory(
             index
             for index, local_repo in enumerate(local_repos)
             if canonical_path
-            and canonical_path
-            in {
-                _normalized_path(Path(local_repo.path)),
-                *(
-                    _normalized_path(Path(path))
+            and (
+                _same_path(Path(canonical_path), Path(local_repo.path).expanduser())
+                or any(
+                    (Path(path).expanduser() / ".git").exists()
+                    and _same_path(Path(canonical_path), Path(path).expanduser())
                     for path in local_repo.worktree_paths
-                    if (Path(path).expanduser() / ".git").exists()
-                ),
-            }
+                )
+            )
         }
         remote_indexes = {
             index

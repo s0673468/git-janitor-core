@@ -13,6 +13,8 @@ from unittest import mock
 
 from git_janitor import cli
 from git_janitor.models import BranchState, CommandResult, LinkedWorktreeState, RepoState
+from git_janitor.reproduce import restore_report
+from git_janitor.report import render_json, render_markdown
 
 
 class ReconciliationCliIntegrationTests(unittest.TestCase):
@@ -60,6 +62,9 @@ class ReconciliationCliIntegrationTests(unittest.TestCase):
         self.assertTrue(reconciliation["rows"][0]["canonical_checkout_present"])
         self.assertEqual(payload["automation_decisions"], [])
         self.assertEqual(payload["execution_results"], [])
+        restored = restore_report(payload)
+        self.assertEqual(json.loads(render_json(restored)), payload)
+        self.assertEqual(render_markdown(restored), markdown)
 
     def test_authentication_failure_is_partial_and_never_claims_clean(self) -> None:
         with _scenario() as scenario:
