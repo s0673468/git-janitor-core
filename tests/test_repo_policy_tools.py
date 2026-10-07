@@ -2566,6 +2566,81 @@ class SafeDeleteTests(FixtureOwnerTests):
                     failed = [proof.name for proof in report.proofs if not proof.passed]
                     self.assertIn(case["failed_proof"], failed)
 
+    def test_invalid_open_pr_json_blocks_otherwise_proved_branch(self) -> None:
+        for stdout in ("", " ", "{", "[", '[{"number": 1}', "not-json", "[] trailing"):
+            with self.subTest(stdout=stdout):
+                fake = _runner_for_cleanup_scenario("ancestor_pass", "old-docs", open_stdout=stdout)
+                report = evaluate_delete("old-docs", repo_path=REPO_PATH, runner=fake)
+
+                self.assertFalse(report.passed)
+                failed = [proof for proof in report.proofs if not proof.passed]
+                self.assertEqual([proof.name for proof in failed], ["no_open_pr"])
+                self.assertIn("invalid JSON", failed[0].detail)
+
+    def test_invalid_open_pr_shapes_block_otherwise_proved_branch(self) -> None:
+        for stdout in (
+            "null", "{}", '{"error": "unavailable"}', "false", "0", '"[]"',
+            "[null]", "[1]", "[[]]", '[{"number": 1}, null]',
+        ):
+            with self.subTest(stdout=stdout):
+                fake = _runner_for_cleanup_scenario("ancestor_pass", "old-docs", open_stdout=stdout)
+                report = evaluate_delete("old-docs", repo_path=REPO_PATH, runner=fake)
+
+                self.assertFalse(report.passed)
+                failed = [proof for proof in report.proofs if not proof.passed]
+                self.assertEqual([proof.name for proof in failed], ["no_open_pr"])
+                self.assertIn("invalid PR list", failed[0].detail)
+
+    def test_valid_empty_open_pr_list_permits_otherwise_proved_branch(self) -> None:
+        for stdout in ("[]", " \n [] \t"):
+            with self.subTest(stdout=stdout):
+                fake = _runner_for_cleanup_scenario("ancestor_pass", "old-docs", open_stdout=stdout)
+                report = evaluate_delete("old-docs", repo_path=REPO_PATH, runner=fake)
+
+                self.assertTrue(report.passed)
+                proof = next(proof for proof in report.proofs if proof.name == "no_open_pr")
+                self.assertEqual(proof.detail, "no open PR")
+
+    def test_open_pr_and_failed_query_block_otherwise_proved_branch(self) -> None:
+        cases = (
+            ('[{"number": 1, "title": "Pending", "url": "https://github.com/owner/repo/pull/1"}]',
+             0, "", '"number": 1'),
+            ("[]", 1, "query unavailable", "query unavailable"),
+            ("[]", 1, "", "gh pr list failed"),
+        )
+        for stdout, returncode, stderr, detail in cases:
+            with self.subTest(stdout=stdout, returncode=returncode, stderr=stderr):
+                fake = _runner_for_cleanup_scenario(
+                    "ancestor_pass", "old-docs", open_stdout=stdout,
+                    open_returncode=returncode, open_stderr=stderr,
+                )
+                report = evaluate_delete("old-docs", repo_path=REPO_PATH, runner=fake)
+
+                self.assertFalse(report.passed)
+                failed = [proof for proof in report.proofs if not proof.passed]
+                self.assertEqual([proof.name for proof in failed], ["no_open_pr"])
+                self.assertIn(detail, failed[0].detail)
+
+    def test_invalid_open_pr_json_blocks_execute_and_records_failed_proof(self) -> None:
+        fake = _runner_for_cleanup_scenario("ancestor_pass", "old-docs", open_stdout="{")
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "delete.jsonl"
+            with redirect_stdout(io.StringIO()):
+                status = git_safe_delete_main(
+                    ["old-docs", "--execute", "--repo", str(REPO_PATH), "--ledger", str(ledger)],
+                    runner=fake,
+                )
+            entry = json.loads(ledger.read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 3)
+        self.assertEqual(entry["status"], "blocked")
+        self.assertIsNone(entry["exit_code"])
+        failed = [proof for proof in entry["proofs"] if not proof["passed"]]
+        self.assertEqual([proof["name"] for proof in failed], ["no_open_pr"])
+        self.assertIn("invalid JSON", failed[0]["detail"])
+        self.assertFalse(any(call[:2] == ["git", "branch"] for call in fake.calls))
+        self.assertFalse(any(call[:2] == ["git", "update-ref"] for call in fake.calls))
+
     def test_preserve_branch_writes_verified_bundle_and_manifest(self) -> None:
         fake = FakeRunner()
         fake.add(["git", "rev-parse", "old-docs"], stdout="abc123")
@@ -2739,7 +2814,14 @@ def _runner_for_repo_fact_refresh() -> FakeRunner:
     return fake
 
 
-def _runner_for_cleanup_scenario(name: str, branch: str) -> FakeRunner:
+def _runner_for_cleanup_scenario(
+    name: str,
+    branch: str,
+    *,
+    open_stdout: str | None = None,
+    open_returncode: int = 0,
+    open_stderr: str = "",
+) -> FakeRunner:
     fake = FakeRunner()
     fake.add(["git", "remote", "get-url", "origin"], stdout="https://github.com/owner/repo.git")
     fake.add(["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], stdout="origin/main")
@@ -2777,7 +2859,9 @@ def _runner_for_cleanup_scenario(name: str, branch: str) -> FakeRunner:
             "--json",
             "number,title,url",
         ],
-        stdout=json.dumps(open_prs),
+        stdout=json.dumps(open_prs) if open_stdout is None else open_stdout,
+        returncode=open_returncode,
+        stderr=open_stderr,
     )
     merged = []
     if name == "squash_tree_equivalent":

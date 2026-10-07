@@ -383,7 +383,13 @@ def _open_prs(repo: str | None, branch: str, repo_path: Path, runner: Runner) ->
     )
     if result.returncode != 0:
         return [{"error": result.stderr or "gh pr list failed"}]
-    return _json(result.stdout, [])
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return [{"error": "gh pr list returned invalid JSON"}]
+    if not isinstance(payload, list) or any(not isinstance(pr, dict) for pr in payload):
+        return [{"error": "gh pr list returned an invalid PR list"}]
+    return payload
 
 
 def _merged_prs(repo: str | None, branch: str, repo_path: Path, runner: Runner) -> list[dict[str, Any]]:
