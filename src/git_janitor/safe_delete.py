@@ -114,6 +114,9 @@ def evaluate_delete(
 
     branch_ref = runner(["git", "rev-parse", "--verify", branch], repo_path, 30)
     proofs.append(_proof("branch_exists", branch_ref.returncode == 0, branch_ref.stdout or branch_ref.stderr))
+    # The default branch is never a cleanup target; compare full (possibly nested) names.
+    default_branch = default_ref.removeprefix("origin/")
+    proofs.append(_proof("not_default_branch", branch != default_branch, f"default={default_branch}"))
 
     current = runner(["git", "rev-parse", "--abbrev-ref", "HEAD"], repo_path, 30)
     proofs.append(
@@ -171,7 +174,8 @@ def evaluate_delete(
     upstream_gone = False
     if upstream_name:
         upstream_ref = runner(["git", "rev-parse", "--verify", "--quiet", upstream_name], repo_path, 30)
-        upstream_gone = upstream_ref.returncode != 0
+        # Only a clean "ref missing" exit proves gone; timeouts and fatal errors do not.
+        upstream_gone = upstream_ref.returncode == 1
     ancestor = runner(["git", "merge-base", "--is-ancestor", branch, default_ref], repo_path, 30)
     pinned_squash = False
     if expected_head is not None or verified_merge_commit is not None:
@@ -202,12 +206,11 @@ def evaluate_delete(
 
     merged_prs = _merged_prs(repo, branch, repo_path, runner)
     if merged_prs:
-        merge_commit = merged_prs[0].get("mergeCommit", {}).get("oid") or merged_prs[0].get(
-            "mergeCommit"
-        )
+        merge_commit = _merge_commit_oid(merged_prs[0])
     if verified_merge_commit and merge_commit != verified_merge_commit:
         proofs.append(_proof("merged_receipt_matches", False, "merge readback changed"))
-    readback_or_ancestry = bool(merged_prs) or ancestor.returncode == 0
+    # A merged readback is evidence only when it names the merge commit to compare.
+    readback_or_ancestry = bool(merge_commit) or ancestor.returncode == 0
     proofs.append(
         _proof(
             "merged_pr_readback_or_ancestry",
@@ -269,7 +272,11 @@ def preserve_branch(
     head = runner(["git", "rev-parse", branch], repo_path, 30)
     if head.returncode != 0:
         return {"ok": False, "error": head.stderr or "branch not found"}
-    bundle_result = runner(["git", "bundle", "create", str(bundle), branch], repo_path, 120)
+    if bundle.exists():
+        conflict = _existing_bundle_conflict(bundle, branch, head.stdout, repo_path, runner)
+        if conflict:
+            return {"ok": False, "error": conflict}
+    bundle_result =runner(["git", "bundle", "create", str(bundle), branch], repo_path, 120)
     if bundle_result.returncode != 0:
         return {"ok": False, "error": bundle_result.stderr or "bundle create failed"}
     verify = runner(["git", "bundle", "verify", str(bundle)], repo_path, 120)
@@ -314,6 +321,27 @@ def preserve_branch(
         "verify": verify.stdout or verify.stderr,
         "error": "" if ok else (write_error or "bundle or manifest missing/empty after write"),
     }
+
+
+def _existing_bundle_conflict(
+    bundle: Path, branch: str, head: str, repo_path: Path, runner: Runner,
+) -> str:
+    """Allow replacing a bundle only by an identical or fast-forwarded copy of the same ref.
+
+    Flattened names collide (feature/x and feature-x, or two checkouts named alike),
+    and a rewritten branch would otherwise silently discard the preserved history.
+    """
+    refusal = f"refusing to overwrite existing preservation {bundle}"
+    listed = runner(["git", "bundle", "list-heads", str(bundle)], repo_path, 120)
+    heads = listed.stdout.split() if listed.returncode == 0 else []
+    if len(heads) != 2 or heads[1] != f"refs/heads/{branch}":
+        return f"{refusal}: it holds {listed.stdout or listed.stderr or 'unreadable refs'}"
+    if heads[0] == head:
+        return ""
+    contained = runner(["git", "merge-base", "--is-ancestor", heads[0], head], repo_path, 30)
+    if contained.returncode != 0:
+        return f"{refusal}: preserved {heads[0]} is not contained in {branch} at {head}"
+    return ""
 
 
 def append_ledger(
@@ -414,7 +442,16 @@ def _merged_prs(repo: str | None, branch: str, repo_path: Path, runner: Runner) 
     )
     if result.returncode != 0:
         return []
-    return _json(result.stdout, [])
+    payload = _json(result.stdout, [])
+    if not isinstance(payload, list) or any(not isinstance(pr, dict) for pr in payload):
+        return []
+    return payload
+
+
+def _merge_commit_oid(pr: dict[str, Any]) -> str | None:
+    merge = pr.get("mergeCommit")
+    oid = merge.get("oid") if isinstance(merge, dict) else merge
+    return oid if isinstance(oid, str) and oid else None
 
 
 def _secret_risk(branch: str, default_ref: str, repo_path: Path, runner: Runner) -> str:

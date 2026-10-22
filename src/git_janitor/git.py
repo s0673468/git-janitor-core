@@ -24,6 +24,7 @@ class WorktreeEntry:
     path: str
     head: str | None = None
     branch: str | None = None
+    prunable: bool = False
 
 
 def run_command(
@@ -224,6 +225,8 @@ def parse_worktree_porcelain(output: str) -> list[WorktreeEntry]:
             current["head"] = line.removeprefix("HEAD ")
         elif line.startswith("branch "):
             current["branch"] = _short_branch_name(line.removeprefix("branch "))
+        elif line == "prunable" or line.startswith("prunable "):
+            current["prunable"] = "yes"
 
     if current:
         entries.append(_worktree_entry(current))
@@ -519,6 +522,10 @@ def _inspect_linked_worktree(
         head=entry.head,
         default_ref=default_ref,
     )
+    if entry.prunable:
+        # A broken or missing .git link makes git read an enclosing checkout instead.
+        state.errors.append("worktree is prunable; status and commit comparisons unknown")
+        return state
     status = run_command(
         ["git", "status", "--porcelain=v1", "--branch", "--untracked-files=normal"],
         cwd=worktree_path,
@@ -605,6 +612,7 @@ def _worktree_entry(raw: dict[str, str | None]) -> WorktreeEntry:
         path=raw.get("path") or "",
         head=raw.get("head"),
         branch=raw.get("branch"),
+        prunable=bool(raw.get("prunable")),
     )
 
 
