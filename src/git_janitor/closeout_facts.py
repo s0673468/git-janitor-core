@@ -304,6 +304,9 @@ def _worktree_facts(
             continue
         worktree_path = Path(entry.path)
         prefix = f"worktree-{index}"
+        if entry.prunable:
+            # git status there would describe an enclosing checkout, not this worktree.
+            _error(errors, error_details, f"{prefix}-prunable", "worktree is prunable; status unknown")
         status = runner(
             ["git", "status", "--porcelain=v1", "--untracked-files=normal"],
             worktree_path,

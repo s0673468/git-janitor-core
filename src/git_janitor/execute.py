@@ -610,7 +610,8 @@ def _unique_commit_count(cherry_stdout: str) -> int:
 
 
 def _short_ref(ref: str) -> str:
-    return ref.rsplit("/", 1)[-1]
+    # Keep nested default names whole (origin/release/2026 -> release/2026), as the scanner does.
+    return ref.removeprefix("origin/")
 
 
 def _ff_rollback(before: dict[str, Any]) -> str:
