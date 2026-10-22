@@ -345,7 +345,7 @@ def _add_delete_branch(
     fake.add(
         ["git", "rev-parse", "--verify", "--quiet", branch_name],
         returncode=0 if after_exists else 1,
-        stdout="oldsha" if after_exists else "",
+        stdout="a" * 40 if after_exists else "",
     )
 
 
@@ -355,14 +355,21 @@ def _add_delete_branch_verify(
     branch_name: str = "old-docs",
     current_branch: str,
 ) -> None:
-    fake.add(["git", "rev-parse", branch_name], stdout="oldsha")
+    local_ref = f"refs/heads/{branch_name}"
+    default_ref = "refs/remotes/origin/main"
+    fake.add(["git", "show-ref", "--verify", "--hash", local_ref], stdout="a" * 40)
     fake.add(["git", "rev-parse", "--abbrev-ref", "HEAD"], stdout=current_branch)
     fake.add(
-        ["git", "status", "--porcelain=v1", "--branch", "--untracked-files=normal"],
+        ["git", "status", "--porcelain=v1", "--branch", "--untracked-files=all", "--ignored",
+         "--ignore-submodules=none"],
         stdout=_status_clean(),
     )
-    fake.add(["git", "merge-base", "--is-ancestor", branch_name, "origin/main"])
-    fake.add(["git", "cherry", "-v", "origin/main", branch_name], stdout="")
+    fake.add(["git", "stash", "list", "--format=%H"])
+    fake.add(["git", "ls-files", "--stage", "-z"])
+    fake.add(["git", "worktree", "list", "--porcelain"],
+             stdout=f"worktree /tmp/repo\nHEAD {'a' * 40}\nbranch refs/heads/{current_branch}\n")
+    fake.add(["git", "merge-base", "--is-ancestor", local_ref, default_ref])
+    fake.add(["git", "cherry", "-v", default_ref, local_ref], stdout="")
 
 
 def _add_pr_merge(
