@@ -429,7 +429,10 @@ def reconcile_inventory(
                 ),
                 project=project,
                 github_repository=github_repo,
-                local_paths=tuple(sorted({repo.path for repo in matched_locals}, key=str.casefold)),
+                local_paths=tuple(sorted(
+                    {repo.path for repo in matched_locals},
+                    key=lambda path: (path.casefold(), path),
+                )),
                 worktree_paths=tuple(
                     sorted(
                         {
@@ -437,7 +440,7 @@ def reconcile_inventory(
                             for repo in matched_locals
                             for path in repo.worktree_paths
                         },
-                        key=str.casefold,
+                        key=lambda path: (path.casefold(), path),
                     )
                 ),
                 issues=tuple(sorted(issues, key=lambda item: (item.category, item.detail))),
@@ -493,7 +496,7 @@ def reconcile_inventory(
                 worktree_paths=tuple(
                     sorted(
                         {path for repo in matching_locals for path in repo.worktree_paths},
-                        key=str.casefold,
+                        key=lambda path: (path.casefold(), path),
                     )
                 ),
                 issues=tuple(issues),
@@ -895,7 +898,7 @@ def _build_local_inventory(
                 worktree_paths=tuple(
                     sorted(
                         {nodes[path] for path in component if path != representative_path},
-                        key=str.casefold,
+                        key=lambda path: (path.casefold(), path),
                     )
                 ),
                 errors=tuple(component_errors),

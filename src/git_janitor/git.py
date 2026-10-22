@@ -172,7 +172,7 @@ def _walk_git_repos(
 def parse_github_remote(remote_url: str | None) -> str | None:
     if not remote_url:
         return None
-    match = GITHUB_REMOTE_RE.search(remote_url.strip())
+    match = GITHUB_REMOTE_RE.fullmatch(remote_url.strip())
     if not match:
         return None
     return f"{match.group('owner')}/{match.group('repo')}"
@@ -213,7 +213,8 @@ def status_upstream_gone(output: str) -> bool:
 def parse_worktree_porcelain(output: str) -> list[WorktreeEntry]:
     entries: list[WorktreeEntry] = []
     current: dict[str, str | None] = {}
-    for line in output.splitlines():
+    # Git separates records with LF; Unicode separators can be part of a path.
+    for line in output.split("\n"):
         if line.startswith("worktree "):
             if current:
                 entries.append(_worktree_entry(current))
