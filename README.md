@@ -42,8 +42,9 @@ exact-head tests, dirty-worktree guards, and append-only receipts. Read `--help`
 before an operator command. Branch preservation defaults to
 `~/.local/share/git-janitor/preservation`.
 
-Cleanup checks include ignored files and override preferences that hide untracked
-files or submodule changes. Repositories with stashes or submodules require manual
+Ordinary scans exclude ignored build output such as `.venv/` and `node_modules/`
+from dirty work. Cleanup checks include ignored files and override preferences
+that hide untracked files or submodule changes. Repositories with stashes or submodules require manual
 preservation checks and are blocked from cleanup recommendations and deletion.
 
 Code-review generation is disabled. Tests and required checks govern supported

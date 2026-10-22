@@ -246,8 +246,14 @@ class ActionExecutor:
         if detail:
             return _Preflight(command, str(path), before, before, _branch_rollback(before), detail)
 
-        dirty, untracked, _ahead, _behind, _upstream = git.parse_status_porcelain(status.stdout)
-        before.update({"dirty_files": dirty, "untracked_files": untracked})
+        ignored: list[str] = []
+        dirty, untracked, _ahead, _behind, _upstream = git.parse_status_porcelain(
+            status.stdout, ignored_files=ignored,
+        )
+        before.update({"dirty_files": dirty, "untracked_files": untracked, "ignored_files": ignored})
+        if ignored:
+            return _Preflight(command, str(path), before, before, _branch_rollback(before),
+                              "ignored files require preservation before cleanup")
         default_branch = _short_ref(default_ref)
         detail = _delete_branch_drift_detail(
             branch_name=branch_name,

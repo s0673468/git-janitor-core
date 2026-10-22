@@ -41,6 +41,7 @@ class LinkedWorktreeState:
     unique_commit_count: int | None = None
     dirty_files: list[str] = field(default_factory=list)
     untracked_files: list[str] = field(default_factory=list)
+    ignored_files: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     ahead: int = 0
     behind: int = 0
@@ -60,6 +61,7 @@ class RepoState:
     github_repo: str | None = None
     dirty_files: list[str] = field(default_factory=list)
     untracked_files: list[str] = field(default_factory=list)
+    ignored_files: list[str] = field(default_factory=list)
     ahead: int = 0
     behind: int = 0
     upstream: str | None = None

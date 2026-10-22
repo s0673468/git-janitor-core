@@ -18,7 +18,9 @@ GITHUB_REMOTE_RE = re.compile(
     r"(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$"
 )
 
-# Cleanup checks must override preferences that hide local files or submodule dirt.
+# General scans expose untracked work without enumerating ignored build trees.
+STATUS_FLAGS = ("--untracked-files=normal", "--ignore-submodules=none")
+# Deletion proofs must also account for files that Git would otherwise ignore.
 CLEANUP_STATUS_FLAGS = ("--untracked-files=all", "--ignored", "--ignore-submodules=none")
 
 
@@ -206,7 +208,14 @@ def parse_github_remote(remote_url: str | None) -> str | None:
     return f"{match.group('owner')}/{match.group('repo')}"
 
 
-def parse_status_porcelain(output: str) -> tuple[list[str], list[str], int, int, str | None]:
+def parse_status_porcelain(
+    output: str, *, ignored_files: list[str] | None = None,
+) -> tuple[list[str], list[str], int, int, str | None]:
+    """Parse work separately from ignored files, optionally collecting the latter.
+
+    Keep the five-value result for callers that only need ordinary work status.
+    Cleanup callers must collect ignored_files and check them before deletion.
+    """
     dirty: list[str] = []
     untracked: list[str] = []
     ahead = 0
@@ -226,6 +235,9 @@ def parse_status_porcelain(output: str) -> tuple[list[str], list[str], int, int,
         path = line[3:] if len(line) > 3 else line
         if line.startswith("?? "):
             untracked.append(path)
+        elif line.startswith("!! "):
+            if ignored_files is not None:
+                ignored_files.append(path)
         else:
             dirty.append(path)
     return dirty, untracked, ahead, behind, upstream
@@ -338,12 +350,14 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
         )
 
     status = run_command(
-        ["git", "status", "--porcelain=v1", "--branch", *CLEANUP_STATUS_FLAGS],
+        ["git", "status", "--porcelain=v1", "--branch", *STATUS_FLAGS],
         cwd=path,
         timeout=config.command_timeout_seconds,
     )
     if status.returncode == 0:
-        dirty, untracked, ahead, behind, upstream = parse_status_porcelain(status.stdout)
+        dirty, untracked, ahead, behind, upstream = parse_status_porcelain(
+            status.stdout, ignored_files=repo.ignored_files,
+        )
         repo.dirty_files = dirty
         repo.untracked_files = untracked
         repo.ahead = ahead
@@ -566,7 +580,7 @@ def _inspect_linked_worktree(
         state.errors.append("worktree is prunable; status and commit comparisons unknown")
         return state
     status = run_command(
-        ["git", "status", "--porcelain=v1", "--branch", *CLEANUP_STATUS_FLAGS],
+        ["git", "status", "--porcelain=v1", "--branch", *STATUS_FLAGS],
         cwd=worktree_path,
         timeout=config.command_timeout_seconds,
     )
@@ -574,7 +588,9 @@ def _inspect_linked_worktree(
         state.errors.append(status.stderr or "failed to read linked worktree status")
         return state
 
-    dirty, untracked, ahead, behind, upstream = parse_status_porcelain(status.stdout)
+    dirty, untracked, ahead, behind, upstream = parse_status_porcelain(
+        status.stdout, ignored_files=state.ignored_files,
+    )
     state.dirty_files = dirty
     state.untracked_files = untracked
     state.upstream = upstream

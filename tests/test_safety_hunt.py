@@ -120,7 +120,13 @@ class SafetyHuntTests(unittest.TestCase):
                     if kind == "hidden-untracked":
                         self.git("config", "status.showUntrackedFiles", "no")
                 state = self.assert_linked_preserved(linked)
-                self.assertTrue(state.dirty_files or state.untracked_files)
+                # The hidden-untracked iteration inherits the scratch.txt ignore rule.
+                if kind in {"ignored", "hidden-untracked"}:
+                    self.assertEqual(state.dirty_files, [])
+                    self.assertEqual(state.untracked_files, [])
+                    self.assertEqual(state.ignored_files, [])  # Not enumerated by a general scan.
+                else:
+                    self.assertTrue(state.dirty_files or state.untracked_files)
 
     def test_ignored_primary_work_blocks_branch_deletion(self):
         self.git("branch", "topic")
