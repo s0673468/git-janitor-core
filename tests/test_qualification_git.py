@@ -228,7 +228,9 @@ class QualificationGitTests(unittest.TestCase):
     def test_failed_branch_enumeration_retains_partial_observations(self) -> None:
         def fake(args, **kwargs):
             if args[:2] == ["git", "for-each-ref"]:
-                return CommandResult(args, 1, "main|origin/main|2026-10-05|base", "partial refs")
+                return CommandResult(
+                    args, 1, "main\x00origin/main\x002026-10-05\x00base\n", "partial refs"
+                )
             return run_command(args, **kwargs)
 
         with patch("git_janitor.git.run_command", side_effect=fake):
