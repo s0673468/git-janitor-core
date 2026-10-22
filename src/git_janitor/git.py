@@ -32,8 +32,9 @@ def fast_forward_blockers(
 
     Ignored files are clean worktree state, but Git normally overwrites them
     during a merge. Inspect only paths newly tracked by the target, including
-    file/directory and symlink obstructions in their parents. Execution must
-    also use --no-overwrite-ignore to protect files created after this check.
+    file/directory and symlink obstructions in their parents. HEAD entries
+    removed by the target are safe to replace. Execution must also use
+    --no-overwrite-ignore to protect files created after this check.
     """
     if runner is None:
         runner = run_command
@@ -44,6 +45,7 @@ def fast_forward_blockers(
     )
     if additions.returncode != 0:
         return ["incoming path inspection failed; fast-forward overwrite safety unknown"]
+    removed_paths: set[str] | None = None
     for name in additions.stdout.split("\0"):
         if not name:
             continue
@@ -60,8 +62,48 @@ def fast_forward_blockers(
             except OSError:
                 return ["incoming path inspection failed; fast-forward overwrite safety unknown"]
             if index == len(parts) - 1 or not stat.S_ISDIR(mode):
+                if removed_paths is None:
+                    trees = []
+                    for revision in (head, upstream):
+                        tree = runner(
+                            ["git", "ls-tree", "-r", "--name-only", "-z", revision, "--"],
+                            path, timeout,
+                        )
+                        if tree.returncode != 0:
+                            return ["HEAD/target tree inspection failed; "
+                                    "fast-forward overwrite safety unknown"]
+                        trees.append(set(filter(None, tree.stdout.split("\0"))))
+                    removed_paths = trees[0] - trees[1]
+                obstruction = "/".join(parts[:index + 1])
+                if any(_tracked_obstruction(path, obstruction, tracked)
+                       for tracked in removed_paths):
+                    # Git will remove this HEAD entry before creating the addition.
+                    break
                 return ["fast-forward would overwrite local files; preservation required"]
     return []
+
+
+def _tracked_obstruction(root: Path, name: str, tracked: str) -> bool:
+    if name == tracked:
+        return True
+    if name.casefold() != tracked.casefold():
+        return False
+    try:
+        local, original = (root / name).lstat(), (root / tracked).lstat()
+        if not local.st_ino or (local.st_dev, local.st_ino) != (original.st_dev, original.st_ino):
+            return False
+        # Case aliases share an entry on insensitive filesystems. Two actual
+        # spellings (including hard links) are distinct local files to preserve.
+        parent = root
+        for part, old_part in zip(Path(name).parts, Path(tracked).parts):
+            if part != old_part:
+                names = os.listdir(parent)
+                if part in names and old_part in names:
+                    return False
+            parent /= part
+        return True
+    except OSError:
+        return False
 
 
 def ignored_cleanup_blockers(path: Path, timeout: int = 45) -> list[str]:
@@ -89,21 +131,34 @@ def cleanup_blockers(path: Path, runner=None, timeout: int = 45) -> list[str]:
     A superproject's status cannot prove ignored files or unpublished commits in
     its submodules are preserved, even with --ignore-submodules=none.
     """
+    return (stash_cleanup_blockers(path, runner, timeout)
+            + submodule_cleanup_blockers(path, runner, timeout))
+
+
+def stash_cleanup_blockers(path: Path, runner=None, timeout: int = 45) -> list[str]:
     if runner is None:
         def runner(args, cwd, timeout):
             return run_command(args, cwd=cwd, timeout=timeout)
-    errors: list[str] = []
+    blockers: list[str] = []
     stashes = runner(["git", "stash", "list", "--format=%H"], path, timeout)
     if stashes.returncode != 0:
-        errors.append("stash inspection failed; cleanup safety unknown")
+        blockers.append("stash inspection failed; cleanup safety unknown")
     elif stashes.stdout:
-        errors.append("stashed work requires preservation before cleanup")
+        blockers.append("stashed work requires preservation before cleanup")
+    return blockers
+
+
+def submodule_cleanup_blockers(path: Path, runner=None, timeout: int = 45) -> list[str]:
+    if runner is None:
+        def runner(args, cwd, timeout):
+            return run_command(args, cwd=cwd, timeout=timeout)
+    blockers: list[str] = []
     index = runner(["git", "ls-files", "--stage", "-z"], path, timeout)
     if index.returncode != 0:
-        errors.append("submodule inspection failed; cleanup safety unknown")
+        blockers.append("submodule inspection failed; cleanup safety unknown")
     elif any(record.startswith("160000 ") for record in index.stdout.split("\0")):
-        errors.append("submodules require separate preservation proof before cleanup")
-    return errors
+        blockers.append("submodules require separate preservation proof before cleanup")
+    return blockers
 
 
 @dataclass(frozen=True)
@@ -427,7 +482,11 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
     else:
         repo.errors.append(status.stderr or "failed to read git status")
 
-    repo.errors.extend(cleanup_blockers(path, timeout=config.command_timeout_seconds))
+    shared_blockers = stash_cleanup_blockers(path, timeout=config.command_timeout_seconds)
+    repo.cleanup_blockers.extend(shared_blockers)
+    repo.cleanup_blockers.extend(submodule_cleanup_blockers(
+        path, timeout=config.command_timeout_seconds,
+    ))
 
     repo.branches = _scan_branches(
         path, default_ref, repo.current_branch, config, errors=repo.errors,
@@ -438,7 +497,9 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
             repo.tracking_remote = branch_state.tracking_remote
             repo.tracking_merge = branch_state.tracking_merge
             break
-    repo.linked_worktrees, worktree_errors = _scan_linked_worktrees(path, default_ref, config)
+    repo.linked_worktrees, worktree_errors = _scan_linked_worktrees(
+        path, default_ref, config, shared_cleanup_blocked=bool(shared_blockers),
+    )
     repo.errors.extend(worktree_errors)
     linked_branches = {worktree.branch for worktree in repo.linked_worktrees}
     if any(
@@ -447,7 +508,7 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
         and branch.merged_to_default and branch.unique_commit_count == 0
         for branch in repo.branches
     ):
-        repo.cleanup_blockers = ignored_cleanup_blockers(path, config.command_timeout_seconds)
+        repo.cleanup_blockers.extend(ignored_cleanup_blockers(path, config.command_timeout_seconds))
     return repo
 
 
@@ -611,6 +672,8 @@ def _scan_linked_worktrees(
     path: Path,
     default_ref: str | None,
     config: ScannerConfig,
+    *,
+    shared_cleanup_blocked: bool | None = None,
 ) -> tuple[list[LinkedWorktreeState], list[str]]:
     worktrees_raw = run_command(
         ["git", "worktree", "list", "--porcelain"],
@@ -622,11 +685,15 @@ def _scan_linked_worktrees(
 
     linked: list[LinkedWorktreeState] = []
     errors: list[str] = []
+    if shared_cleanup_blocked is None:
+        shared_cleanup_blocked = bool(stash_cleanup_blockers(
+            path, timeout=config.command_timeout_seconds,
+        ))
     for entry in parse_worktree_porcelain(worktrees_raw.stdout):
         worktree_path = Path(entry.path)
         if _same_path(worktree_path, path):
             continue
-        state = _inspect_linked_worktree(entry, default_ref, config)
+        state = _inspect_linked_worktree(entry, default_ref, config, shared_cleanup_blocked)
         linked.append(state)
         errors.extend(f"{state.path}: {error}" for error in state.errors)
     return linked, errors
@@ -636,6 +703,7 @@ def _inspect_linked_worktree(
     entry: WorktreeEntry,
     default_ref: str | None,
     config: ScannerConfig,
+    shared_cleanup_blocked: bool,
 ) -> LinkedWorktreeState:
     worktree_path = Path(entry.path)
     state = LinkedWorktreeState(
@@ -666,7 +734,13 @@ def _inspect_linked_worktree(
     state.ahead = ahead
     state.behind = behind
     state.upstream_gone = status_upstream_gone(status.stdout)
-    state.errors.extend(cleanup_blockers(worktree_path, timeout=config.command_timeout_seconds))
+    # Stashes belong to the common repository, not an individual worktree.
+    # Keep their detailed evidence once on RepoState and reference it here.
+    if shared_cleanup_blocked:
+        state.cleanup_blockers.append("shared saved-work blockers apply; see repository cleanup blockers")
+    state.cleanup_blockers.extend(submodule_cleanup_blockers(
+        worktree_path, timeout=config.command_timeout_seconds,
+    ))
     if entry.branch:
         state.tracking_configured, state.tracking_remote, state.tracking_merge = (
             _tracking_configuration(worktree_path, entry.branch, config, state.errors)
@@ -696,9 +770,9 @@ def _inspect_linked_worktree(
         worktree_path, f"refs/remotes/{default_ref}", "HEAD", config, errors=state.errors,
     )
     if state.upstream_gone and state.tree_matches_default and state.unique_commit_count == 0:
-        state.cleanup_blockers = ignored_cleanup_blockers(
+        state.cleanup_blockers.extend(ignored_cleanup_blockers(
             worktree_path, config.command_timeout_seconds,
-        )
+        ))
     return state
 
 
