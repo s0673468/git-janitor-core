@@ -53,7 +53,7 @@ to `false`, so `--apply` executes nothing until a human enables both gates.
 Command:
 
 ```sh
-git pull --ff-only
+git merge --ff-only --no-overwrite-ignore <verified-upstream-commit>
 ```
 
 Preconditions:
@@ -63,8 +63,12 @@ Preconditions:
 - upstream is resolved
 - current branch is behind upstream
 - current branch is not ahead of upstream
+- incoming tracked paths do not overwrite existing local files, including ignored files
 
-The engine records `HEAD` before and after the pull.
+The engine resolves and pins the locally available upstream commit, and records
+`HEAD` before and after the merge. Remote fetching belongs to the scan, so the
+execution step cannot fetch a different target after preflight. Git's
+`--no-overwrite-ignore` also protects ignored files created after preflight.
 
 Rollback hint: inspect the before and after refs; reset only with explicit human
 approval if the fast-forward must be undone.

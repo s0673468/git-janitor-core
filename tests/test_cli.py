@@ -258,14 +258,21 @@ def _green_pr() -> PullRequestState:
 
 
 def _add_branch_preflight(fake: FakeRunner) -> None:
-    fake.add(["git", "rev-parse", "old-docs"], stdout="oldsha")
+    local_ref = "refs/heads/old-docs"
+    default_ref = "refs/remotes/origin/main"
+    fake.add(["git", "show-ref", "--verify", "--hash", local_ref], stdout="a" * 40)
     fake.add(["git", "rev-parse", "--abbrev-ref", "HEAD"], stdout="main")
     fake.add(
-        ["git", "status", "--porcelain=v1", "--branch", "--untracked-files=normal"],
+        ["git", "status", "--porcelain=v1", "--branch", "--untracked-files=all", "--ignored",
+         "--ignore-submodules=none"],
         stdout="## main...origin/main",
     )
-    fake.add(["git", "merge-base", "--is-ancestor", "old-docs", "origin/main"])
-    fake.add(["git", "cherry", "-v", "origin/main", "old-docs"], stdout="")
+    fake.add(["git", "stash", "list", "--format=%H"])
+    fake.add(["git", "ls-files", "--stage", "-z"])
+    fake.add(["git", "worktree", "list", "--porcelain"],
+             stdout="worktree /tmp/repo\nHEAD " + "a" * 40 + "\nbranch refs/heads/main\n")
+    fake.add(["git", "merge-base", "--is-ancestor", local_ref, default_ref])
+    fake.add(["git", "cherry", "-v", default_ref, local_ref], stdout="")
 
 
 def _fixed_clock() -> datetime:

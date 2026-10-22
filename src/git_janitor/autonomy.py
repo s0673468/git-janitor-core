@@ -214,22 +214,24 @@ def decide_branch_cleanup(
             evidence=tuple(repo.errors),
         )
 
-    if repo.dirty_files or repo.untracked_files:
+    if repo.dirty_files or repo.untracked_files or repo.ignored_files or repo.cleanup_blockers:
         return AutomationDecision(
             disposition=REPORT_BLOCKED,
             category="dirty-worktree",
             title=f"{label} is in a dirty repository",
             reason="Branch cleanup should not run while local work may be active.",
             recommended_action="Review the dirty worktree before considering branch deletion.",
-            evidence=tuple(repo.dirty_files + repo.untracked_files),
+            evidence=tuple(repo.dirty_files + repo.untracked_files
+                           + repo.ignored_files + repo.cleanup_blockers),
         )
 
-    if branch.current or branch.name == repo.default_branch:
+    if (branch.current or branch.name == repo.default_branch
+            or any(worktree.branch == branch.name for worktree in repo.linked_worktrees)):
         return AutomationDecision(
             disposition=NO_OP,
             category="protected-branch",
             title=f"{label} is not a cleanup target",
-            reason="The branch is current or is the default branch.",
+            reason="The branch is checked out or is the default branch.",
             recommended_action="Leave the branch unchanged.",
             evidence=evidence,
         )
@@ -301,7 +303,8 @@ def decide_linked_worktree_cleanup(
             evidence=evidence,
         )
 
-    if worktree.dirty_files or worktree.untracked_files:
+    if (worktree.dirty_files or worktree.untracked_files
+            or worktree.ignored_files or worktree.cleanup_blockers):
         return AutomationDecision(
             disposition=REPORT_BLOCKED,
             category="stale-linked-worktree-not-safe",
@@ -611,5 +614,7 @@ def _linked_worktree_evidence(
         f"unique_commit_count={worktree.unique_commit_count}",
         f"dirty_files={len(worktree.dirty_files)}",
         f"untracked_files={len(worktree.untracked_files)}",
+        f"ignored_files={len(worktree.ignored_files)}",
+        *(f"cleanup_blocker={blocker}" for blocker in worktree.cleanup_blockers),
         *(f"error={error}" for error in worktree.errors),
     )

@@ -17,7 +17,7 @@
       },
       "expected": {
         "status": "applied",
-        "command": ["git", "pull", "--ff-only"]
+        "command": ["git", "merge", "--ff-only", "--no-overwrite-ignore", "bbb222"]
       }
     },
     {
@@ -102,7 +102,7 @@
       },
       "expected": {
         "status": "drifted",
-        "command": ["git", "pull", "--ff-only"]
+        "command": ["git", "merge", "--ff-only", "--no-overwrite-ignore", "@{upstream}"]
       }
     },
     {
@@ -122,7 +122,7 @@
       },
       "expected": {
         "status": "drifted",
-        "command": ["git", "pull", "--ff-only"]
+        "command": ["git", "merge", "--ff-only", "--no-overwrite-ignore", "@{upstream}"]
       }
     },
     {
@@ -142,7 +142,7 @@
       },
       "expected": {
         "status": "drifted",
-        "command": ["git", "pull", "--ff-only"]
+        "command": ["git", "merge", "--ff-only", "--no-overwrite-ignore", "@{upstream}"]
       }
     },
     {

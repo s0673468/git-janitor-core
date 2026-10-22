@@ -8,7 +8,13 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .git import parse_github_remote, parse_worktree_porcelain, run_command
+from .git import (
+    CLEANUP_STATUS_FLAGS,
+    cleanup_blockers,
+    parse_github_remote,
+    parse_worktree_porcelain,
+    run_command,
+)
 
 
 Runner = Any
@@ -113,7 +119,8 @@ def evaluate_delete(
     default_ref, default_unknown = _default_ref(repo_path, runner)
     merge_commit: str | None = None
 
-    branch_ref = runner(["git", "rev-parse", "--verify", branch], repo_path, 30)
+    local_ref = f"refs/heads/{branch}"
+    branch_ref = runner(["git", "show-ref", "--verify", "--hash", local_ref], repo_path, 30)
     proofs.append(_proof("branch_exists", branch_ref.returncode == 0, branch_ref.stdout or branch_ref.stderr))
     # The default branch is never a cleanup target; compare full (possibly nested) names.
     # Without a readable origin/HEAD the default is unknown, so no branch is proved non-default.
@@ -135,7 +142,8 @@ def evaluate_delete(
         )
     )
 
-    status_args = ["git", "status", "--porcelain=v1"]
+    status_args = ["git", "status", "--porcelain=v1", *CLEANUP_STATUS_FLAGS]
+    scoped_owner = False
     if owned_worktree is not None:
         try:
             owned_relative = owned_worktree.relative_to(repo_path)
@@ -147,24 +155,36 @@ def evaluate_delete(
             # Only the named task subtree is exempt from primary-checkout dirt.
             # --untracked-files=all keeps sibling files/worktrees visible rather
             # than dropping a collapsed ?? .worktrees/ row.
-            status_args += ["--untracked-files=all", "--", ".",
+            status_args += ["-z", "--", ".",
                             f":(exclude,literal){owned_relative.as_posix()}"]
     status = runner(status_args, repo_path, 30)
+    status_output = status.stdout
+    if scoped_owner:
+        # Git still emits an ignored directory despite the exclusion pathspec.
+        # Exempt only that exact subtree's row; its own full status is checked
+        # below. NUL records keep spaces, Unicode and quoted paths unambiguous.
+        ignored_owner = f"!! {owned_relative.as_posix()}/"
+        status_output = "\0".join(row for row in status_output.split("\0") if row != ignored_owner)
     proofs.append(
         _proof(
             "worktree_clean",
-            status.returncode == 0 and not status.stdout.strip(),
-            status.stdout or status.stderr or "clean",
+            status.returncode == 0 and not status_output.strip(),
+            status_output or status.stderr or "clean",
         )
     )
+    blockers = cleanup_blockers(repo_path, runner, 30)
+    proofs.append(_proof("saved_and_nested_work_preserved", not blockers, "; ".join(blockers) or "none"))
 
     worktree = runner(["git", "worktree", "list", "--porcelain"], repo_path, 30)
     active_path = _branch_worktree(branch, worktree.stdout) if worktree.returncode == 0 else None
     owned = owned_worktree is not None and active_path == str(owned_worktree)
     if owned_worktree is not None:
-        owned_status = runner(["git", "status", "--porcelain=v1", "--untracked-files=all"], owned_worktree, 30)
+        owned_status = runner(["git", "status", "--porcelain=v1", *CLEANUP_STATUS_FLAGS], owned_worktree, 30)
         proofs.append(_proof("owned_worktree_clean", owned_status.returncode == 0 and not owned_status.stdout,
                              owned_status.stdout or owned_status.stderr or "clean"))
+        owned_blockers = cleanup_blockers(owned_worktree, runner, 30)
+        proofs.append(_proof("owned_saved_and_nested_work_preserved", not owned_blockers,
+                             "; ".join(owned_blockers) or "none"))
     proofs.append(
         _proof(
             "branch_not_checked_out_elsewhere",
@@ -184,7 +204,8 @@ def evaluate_delete(
         upstream_ref = runner(["git", "rev-parse", "--verify", "--quiet", upstream_name], repo_path, 30)
         # Only a clean "ref missing" exit proves gone; timeouts and fatal errors do not.
         upstream_gone = upstream_ref.returncode == 1
-    ancestor = runner(["git", "merge-base", "--is-ancestor", branch, default_ref], repo_path, 30)
+    comparison_ref = f"refs/remotes/{default_ref}"
+    ancestor = runner(["git", "merge-base", "--is-ancestor", local_ref, comparison_ref], repo_path, 30)
     pinned_squash = False
     if expected_head is not None or verified_merge_commit is not None:
         exact_head = bool(expected_head) and branch_ref.stdout.strip() == expected_head
@@ -229,7 +250,12 @@ def evaluate_delete(
 
     tree_equivalent = False
     if merge_commit:
-        diff = runner(["git", "diff", "--quiet", str(merge_commit), branch], repo_path, 30)
+        merged_ancestor = runner(
+            ["git", "merge-base", "--is-ancestor", str(merge_commit), comparison_ref], repo_path, 30,
+        )
+        proofs.append(_proof("merge_reachable_from_default", merged_ancestor.returncode == 0,
+                             "merge commit must be retained on the default branch"))
+        diff = runner(["git", "diff", "--quiet", str(merge_commit), local_ref], repo_path, 30)
         tree_equivalent = diff.returncode == 0
         proofs.append(
             _proof(
@@ -241,7 +267,7 @@ def evaluate_delete(
     else:
         proofs.append(_proof("squash_tree_equivalence", True, "not a squash-merge branch"))
 
-    secret_risk = _secret_risk(branch, default_ref, repo_path, runner)
+    secret_risk = _secret_risk(local_ref, comparison_ref, repo_path, runner)
     proofs.append(_proof("no_suspected_secret", not secret_risk, secret_risk or "none"))
 
     command = ["git", "branch", "-d", branch]

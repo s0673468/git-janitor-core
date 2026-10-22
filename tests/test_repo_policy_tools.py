@@ -2825,11 +2825,20 @@ def _runner_for_cleanup_scenario(
     fake = FakeRunner()
     fake.add(["git", "remote", "get-url", "origin"], stdout="https://github.com/owner/repo.git")
     fake.add(["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], stdout="origin/main")
-    fake.add(["git", "rev-parse", "--verify", branch], stdout="branch-sha")
+    local_ref = f"refs/heads/{branch}"
+    default_ref = "refs/remotes/origin/main"
+    # Keep the symbolic head used by the fixture's compare-and-delete expectation.
+    fake.add(["git", "show-ref", "--verify", "--hash", local_ref], stdout="branch-sha")
     current_branch = branch if name == "active_branch" else "main"
     fake.add(["git", "rev-parse", "--abbrev-ref", "HEAD"], stdout=current_branch)
     status = " M src/app.py" if name == "dirty_worktree" else ""
-    fake.add(["git", "status", "--porcelain=v1"], stdout=status)
+    fake.add(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all", "--ignored",
+         "--ignore-submodules=none"],
+        stdout=status,
+    )
+    fake.add(["git", "stash", "list", "--format=%H"])
+    fake.add(["git", "ls-files", "--stage", "-z"])
     worktree_output = "worktree /repo\nHEAD abc\nbranch refs/heads/main\n"
     if name == "linked_worktree":
         worktree_output += f"\nworktree /other\nHEAD def\nbranch refs/heads/{branch}\n"
@@ -2843,7 +2852,8 @@ def _runner_for_cleanup_scenario(
         returncode=1,
     )
     ancestor_code = 1 if name == "squash_tree_equivalent" else 0
-    fake.add(["git", "merge-base", "--is-ancestor", branch, "origin/main"], returncode=ancestor_code)
+    fake.add(["git", "merge-base", "--is-ancestor", local_ref, default_ref],
+             returncode=ancestor_code)
     open_prs = [{"number": 1}] if name == "open_pr" else []
     fake.add(
         [
@@ -2883,9 +2893,10 @@ def _runner_for_cleanup_scenario(
         stdout=json.dumps(merged),
     )
     if name == "squash_tree_equivalent":
-        fake.add(["git", "diff", "--quiet", "merge-sha", branch])
+        fake.add(["git", "merge-base", "--is-ancestor", "merge-sha", default_ref])
+        fake.add(["git", "diff", "--quiet", "merge-sha", local_ref])
     changed = "config/.env\n" if name == "secret_path" else ""
-    fake.add(["git", "diff", "--name-only", f"origin/main...{branch}"], stdout=changed)
+    fake.add(["git", "diff", "--name-only", f"{default_ref}...{local_ref}"], stdout=changed)
     return fake
 
 

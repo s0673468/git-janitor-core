@@ -41,12 +41,14 @@ class LinkedWorktreeState:
     unique_commit_count: int | None = None
     dirty_files: list[str] = field(default_factory=list)
     untracked_files: list[str] = field(default_factory=list)
+    ignored_files: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     ahead: int = 0
     behind: int = 0
     tracking_configured: bool | None = None
     tracking_remote: str | None = None
     tracking_merge: str | None = None
+    cleanup_blockers: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -60,6 +62,7 @@ class RepoState:
     github_repo: str | None = None
     dirty_files: list[str] = field(default_factory=list)
     untracked_files: list[str] = field(default_factory=list)
+    ignored_files: list[str] = field(default_factory=list)
     ahead: int = 0
     behind: int = 0
     upstream: str | None = None
@@ -73,6 +76,7 @@ class RepoState:
     tracking_configured: bool | None = None
     tracking_remote: str | None = None
     tracking_merge: str | None = None
+    cleanup_blockers: list[str] = field(default_factory=list)
 
 
 @dataclass
