@@ -12,15 +12,27 @@ reproduced on generated temporary repositories; regressions live in
    `git-safe-delete main --execute` passed every proof and ran
    `git branch -d main`. The execution engine and scanner already refuse this.
    Fix: proof `not_default_branch` compares the full name against `origin/HEAD`
-   (`safe_delete.py:117-119`). Nested defaults (`origin/release/2026`) match by
+   (`safe_delete.py:118-127`). Nested defaults (`origin/release/2026`) match by
    full name. Still accepted: branches that merely resemble it (`main-fix`,
    `feature/main`, `2026` when the default is `release/2026`).
+
+   Follow-up (review): when `origin/HEAD` was missing or its lookup timed out,
+   `_default_ref` guessed `origin/main`. In a `master` repository with a stale
+   `origin/main` that already contains `master`, every proof passed for
+   `master`. Fix: an unreadable `origin/HEAD` now fails `not_default_branch`
+   with the reason and the repair command (`safe_delete.py:421-431`). This is
+   a new refusal for clones without `origin/HEAD` (e.g. `git init` +
+   `git remote add` + `fetch`); one `git remote set-head origin <default>`
+   restores normal behaviour. The tool cannot otherwise tell which branch is
+   the default, so it cannot prove any target is not the default. Still
+   accepted: any repository whose `origin/HEAD` is set, including nested
+   defaults and defaults other than `main`.
 
 2. **Failed upstream probe counted as "upstream gone".** Any non-zero exit of
    `git rev-parse --verify --quiet <upstream>` (timeout 124, fatal 128) set
    `upstream_gone=True`, which satisfies `upstream_gone_or_ancestor` and is
    written to the receipt. Fix: only exit 1 (ref missing) proves gone
-   (`safe_delete.py:176-178`), matching the scanner (`git.py:459`). Still
+   (`safe_delete.py:184-186`), matching the scanner (`git.py:459`). Still
    accepted: a configured upstream whose remote-tracking ref is absent.
 
 3. **Malformed merged-PR readback counted as merge proof or crashed.** A
@@ -29,8 +41,8 @@ reproduced on generated temporary repositories; regressions live in
    commit to compare, which also skipped `squash_tree_equivalence`. `null`,
    non-list or non-object entries raised `AttributeError`/`KeyError`, leaving
    no ledger record. Fix: non-list/non-object payloads read as "no readback";
-   a readback counts only when it names a merge commit (`safe_delete.py:207-213`,
-   `423-455`). This is the merged-list twin of the open-PR fix in #3. Still
+   a readback counts only when it names a merge commit (`safe_delete.py:215-221`,
+   `465-497`). This is the merged-list twin of the open-PR fix in #3. Still
    accepted: `mergeCommit: {"oid": sha}` with any extra fields, and a bare-SHA
    `mergeCommit` (the old code intended to accept it but crashed on it). A
    failed `gh` call still falls back to ancestry proof, as before.
@@ -41,10 +53,20 @@ reproduced on generated temporary repositories; regressions live in
    Re-preserving a rewritten branch also replaced the old history. Deleting a
    branch on the strength of the first bundle would then lose it. Fix: an
    existing bundle is replaced only by the same ref at the same head or at a
-   descendant (`safe_delete.py:275-278`, `326-344`). Still accepted: first
+   descendant (`safe_delete.py:315-318`, `366-384`). Still accepted: first
    preservation, identical reruns, reruns after the branch fast-forwarded.
    Refused, with the reason in `error`: a different ref in the same file, a
    non-descendant head, an unreadable existing bundle. Naming is unchanged.
+
+   Follow-up (review): two concurrent runs (`feature/x` and `feature-x`) could
+   both see no bundle; the later `git bundle create` then replaced the first
+   run's bundle, and both returned `ok=True`. Fix: the check, bundle, verify and
+   manifest steps run under an exclusive `<name>.preserve-lock` file created
+   with `O_EXCL` and removed afterwards (`safe_delete.py:283-298`). A colliding
+   run fails with "preservation in progress" instead of waiting. The name
+   avoids `<bundle>.lock`, which git uses itself. If a run is killed, the
+   stale lock blocks that one preservation name until it is removed; the error
+   names the file. Sequential runs behave as before.
 
 5. **Execution engine missed nested default branches.** `_short_ref` kept
    only the last path segment, so with default `origin/release/2026` the
@@ -70,25 +92,31 @@ reproduced on generated temporary repositories; regressions live in
    healthy, locked and detached worktrees. A worktree whose folder is gone was
    already an error.
 
-## Confirmed, not fixed (needs a decision)
+7. **Squash-path `git branch -D` deleted work its proofs never saw.** Two
+   reproduced shapes: (a) a same-name tag shadows the branch, because git
+   resolves a bare name as `refs/tags/<n>` before `refs/heads/<n>`
+   (`safe_delete.py:116`, `187`, `232`, `500`). With tag `topic` at the
+   squash-merged state, branch `topic` one unpushed commit further, a gone
+   upstream and a merged-PR readback, every proof passed and
+   `git branch -D topic` dropped the extra commit. (b) The branch advanced
+   between the proofs and the delete (the gap spans two `gh` calls), and the
+   unpinned `-D` deleted the new, unproved head. Fix: the squash path now runs
+   `git update-ref -d refs/heads/<branch> <proved sha>` (`safe_delete.py:247-252`),
+   the same compare-and-delete the pinned `pr-shepherd` path already used. In
+   both shapes git refuses the delete and the ledger records `failed`. The
+   one existing fixture expectation that pinned `git branch -D`
+   (`tests/fixtures/agent_ops/branch_cleanup_tools.json`, squash case) was
+   updated to the new command; no other test changed. Still accepted: every
+   squash-merged branch whose head did not move, and the plain `-d` path,
+   which is unchanged (git's own merged check still guards it).
 
-- **Same-name tag shadows the branch in every proof** (`safe_delete.py:115`,
-  `179`, `224`, `236`). Git resolves a bare name as `refs/tags/<n>` before
-  `refs/heads/<n>`. Reproduced: tag `topic` at the squash-merged state, branch
-  `topic` with one more unpushed commit and a gone upstream, merged-PR
-  readback present → all proofs pass and the command is
-  `git branch -D topic`, which would drop the unpushed commit. Plain `-d` and
-  the pinned `update-ref` compare-and-delete paths are safe. The robust fix is
-  to resolve `refs/heads/<branch>` explicitly in these commands (or make the
-  `-D` path compare-and-delete against the proved SHA). Both change command
-  strings that existing tests pin exactly
-  (`tests/test_repo_policy_tools.py` `_runner_for_cleanup_scenario`,
-  `tests/fixtures/agent_ops/branch_cleanup_tools.json`), and this task forbids
-  editing existing tests. Left for an approved follow-up.
-- **`-D` time-of-check gap** (`safe_delete.py:68`, `239-241`): the branch could
-  advance between proof and `git branch -D` (the gap spans two `gh` calls).
-  It needs an unchecked-out branch to be updated concurrently. The same
-  compare-and-delete change would close it; same test constraint.
+   Residuals: in shape (a) the proofs still inspect the tag, so a dry run
+   reports `passed` and only the execute step refuses. Fixing that would mean
+   switching every proof to `refs/heads/<n>`, which changes many pinned test
+   commands; no work can be lost now. Unlike `branch -D`, `update-ref -d` does
+   not refuse a branch that someone checks out between proof and delete. That
+   worktree's HEAD becomes unborn, but its files stay on disk, its commits stay
+   in its reflog, and their tree matches the merge commit.
 
 ## Reported, low likelihood, not fixed
 
@@ -109,24 +137,18 @@ deliberately odd ref name; no work is lost.
 
 ## Checked and rejected
 
-- Missing `origin/HEAD` → unverified `origin/main` fallback
-  (`safe_delete.py:381-389`). If the ref is absent, ancestry (exit 128) and the
-  secret-risk diff (`safe_delete.py:457-460`) both fail, so the proof blocks.
-  Residual: if `origin/HEAD` is missing and a stale `origin/main` exists beside
-  another real default, the default guard compares against `main`. No work is
-  lost: ancestry still requires the commits on `origin/main`.
 - Timeouts generally (`git.py:72-78` → exit 124): every other proof accepts
   only exit 0 (`ancestor`, `diff --quiet`, `status`, `worktree list`), and the
   secret check treats any failure as risk.
 - Dirty/active worktrees: `worktree_clean` covers the invoking checkout and
   `branch_not_checked_out_elsewhere` fails closed when `worktree list` fails
-  (`safe_delete.py:130-166`). `git branch -d` and `git worktree remove`
+  (`safe_delete.py:138-174`). `git branch -d` and `git worktree remove`
   (no `--force`) add git's own refusal (`delivery.py:160`).
 - Current branch reported as `heads/<n>` when a tag is ambiguous
-  (`safe_delete.py:121-128`): the worktree-list proof still sees it.
+  (`safe_delete.py:129-136`): the worktree-list proof still sees it.
 - Dry-run versus execute parity: both modes share one preflight/proof report;
   dry-run returns before any mutating call (`execute.py:109-134`,
-  `safe_delete.py:60-67`).
+  `safe_delete.py:60-68`).
 - `pr-shepherd finish` (`delivery.py`): resolved non-symlink path under the
   repository's task directory, exact-head CAS delete, ownership rechecks,
   worktree restore on partial failure. No gap found.

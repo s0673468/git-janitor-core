@@ -8,11 +8,11 @@
       "expected_command": ["git", "branch", "-d", "old-docs"]
     },
     {
-      "name": "squash-equivalent branch uses sanctioned force delete",
+      "name": "squash-equivalent branch uses compare-and-delete pinned to the proved head",
       "scenario": "squash_tree_equivalent",
       "branch": "codex/squashed",
       "expected_passed": true,
-      "expected_command": ["git", "branch", "-D", "codex/squashed"]
+      "expected_command": ["git", "update-ref", "-d", "refs/heads/codex/squashed", "branch-sha"]
     },
     {
       "name": "dirty worktree fails proof",

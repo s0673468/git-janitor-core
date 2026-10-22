@@ -143,7 +143,108 @@ class UpstreamProbeFailureTests(_Repo):
         report = evaluate_delete("topic", repo_path=self.root, runner=self.runner)
 
         self.assertTrue(report.passed, _failed(report))
-        self.assertEqual(report.command, ["git", "branch", "-D", "topic"])
+        head = self.git("rev-parse", "refs/heads/topic")
+        self.assertEqual(report.command, ["git", "update-ref", "-d", "refs/heads/topic", head])
+
+
+class SquashForceDeletePinTests(_Repo):
+    """The squash path deletes only the exact head its proofs inspected."""
+
+    def squash_merged_topic(self):
+        self.gone_upstream_topic()
+        merge = self.squash_of("topic")
+        self.git("update-ref", "refs/remotes/origin/main", merge)
+        self.merged_payload = json.dumps([{"number": 3, "mergeCommit": {"oid": merge}}])
+
+    def execute(self, branch):
+        ledger = self.base_dir / "delete.jsonl"
+        with redirect_stdout(io.StringIO()):
+            status = git_safe_delete_main(
+                [branch, "--execute", "--repo", str(self.root), "--ledger", str(ledger)],
+                runner=self.runner,
+            )
+        return status, json.loads(ledger.read_text().splitlines()[-1])
+
+    def test_squash_equivalent_branch_is_still_deleted(self):
+        self.squash_merged_topic()
+
+        status, entry = self.execute("topic")
+
+        self.assertEqual(status, 0)
+        self.assertEqual(entry["status"], "applied")
+        missing = run_command(["git", "rev-parse", "--verify", "--quiet", "refs/heads/topic"], self.root, 30)
+        self.assertEqual(missing.returncode, 1)
+
+    def test_branch_advanced_after_proofs_is_kept(self):
+        self.squash_merged_topic()
+        proved = self.git("rev-parse", "refs/heads/topic")
+        self.git("switch", "topic")
+        self.commit("late.txt", "late\n", "late unpushed work")
+        late = self.git("rev-parse", "HEAD")
+        self.git("switch", "main")
+        self.git("update-ref", "refs/heads/topic", proved)
+        real_runner = self.runner
+
+        def advancing_runner(args, cwd, timeout):
+            # Another process advances topic right before the deletion runs.
+            if args[:2] in (["git", "branch"], ["git", "update-ref"]):
+                run_command(["git", "update-ref", "refs/heads/topic", late], self.root, 30)
+            return real_runner(args, cwd, timeout)
+
+        self.runner = advancing_runner
+        status, entry = self.execute("topic")
+
+        self.assertNotEqual(status, 0)
+        self.assertEqual(entry["status"], "failed")
+        self.assertEqual(self.git("rev-parse", "refs/heads/topic"), late)
+
+    def test_same_name_tag_cannot_authorize_deleting_branch_work(self):
+        self.squash_merged_topic()
+        # The tag sits at the squash-merged state; the branch gains unpushed work.
+        self.git("tag", "topic", "topic")
+        self.git("switch", "topic")
+        self.commit("extra.txt", "extra\n", "unpushed extra work")
+        extra = self.git("rev-parse", "HEAD")
+        self.git("switch", "main")
+
+        status, entry = self.execute("topic")
+
+        self.assertNotEqual(status, 0)
+        self.assertNotIn(entry["command"], (["git", "branch", "-D", "topic"],))
+        self.assertEqual(self.git("rev-parse", "refs/heads/topic"), extra)
+
+
+class MissingDefaultRefTests(_Repo):
+    def test_unreadable_origin_head_blocks_instead_of_guessing_main(self):
+        # Real default is master; a stale origin/main already contains it.
+        self.git("branch", "-m", "main", "master")
+        self.git("update-ref", "refs/remotes/origin/master", self.base)
+        self.git("symbolic-ref", "-d", "refs/remotes/origin/HEAD")
+        self.git("switch", "-c", "feature")
+        probe = ("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+        for override in (None, CommandResult(list(probe), 124, "", "command timed out after 30s")):
+            with self.subTest(override=override):
+                self.overrides.pop(probe, None)
+                if override is not None:
+                    self.overrides[probe] = override
+
+                report = evaluate_delete("master", repo_path=self.root, runner=self.runner)
+
+                self.assertFalse(report.passed)
+                self.assertIn("not_default_branch", _failed(report))
+
+    def test_readable_origin_head_still_permits_merged_branch(self):
+        self.git("branch", "-m", "main", "master")
+        self.git("update-ref", "refs/remotes/origin/master", self.base)
+        self.git("update-ref", "-d", "refs/remotes/origin/main")
+        self.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master")
+        self.git("branch", "old-docs")
+
+        report = evaluate_delete("old-docs", repo_path=self.root, runner=self.runner)
+        default = evaluate_delete("master", repo_path=self.root, runner=self.runner)
+
+        self.assertTrue(report.passed, _failed(report))
+        self.assertIn("not_default_branch", _failed(default))
 
 
 class MergedReadbackShapeTests(_Repo):
@@ -235,6 +336,39 @@ class PreservationOverwriteTests(_Repo):
         self.assertTrue(again["ok"], again)
         self.assertTrue(advanced["ok"], advanced)
         self.assertEqual(self.heads(advanced["bundle"]), f"{new} refs/heads/topic")
+
+    def test_concurrent_colliding_preservation_cannot_overwrite(self):
+        self.git("branch", "feature/x")
+        self.git("switch", "-c", "feature-x")
+        self.commit("other.txt", "other\n", "other work")
+        self.git("switch", "main")
+        real_runner = self.runner
+        racing: list[dict] = []
+
+        def racing_runner(args, cwd, timeout):
+            # A second run starts after the first checked for an existing bundle
+            # and finishes before the first creates its own.
+            if args[:3] == ["git", "bundle", "create"] and not racing:
+                self.runner = real_runner
+                racing.append(self.preserve("feature/x"))
+            return real_runner(args, cwd, timeout)
+
+        self.runner = racing_runner
+        first = self.preserve("feature-x")
+        self.runner = real_runner
+
+        results = [first, *racing]
+        self.assertEqual(len(results), 2)
+        self.assertEqual(sum(1 for result in results if result["ok"]), 1, results)
+        kept = next(result for result in results if result["ok"])
+        branch = "feature-x" if kept is first else "feature/x"
+        self.assertEqual(self.heads(kept["bundle"]), f"{self.git('rev-parse', branch)} refs/heads/{branch}")
+        loser = next(result for result in results if not result["ok"])
+        self.assertIn("in progress", loser["error"])
+        # The lock is released afterwards, and a later run sees the kept bundle.
+        later = self.preserve("feature/x" if branch == "feature-x" else "feature-x")
+        self.assertFalse(later["ok"])
+        self.assertIn("refusing to overwrite", later["error"])
 
 
 class PrunableLinkedWorktreeTests(_Repo):
