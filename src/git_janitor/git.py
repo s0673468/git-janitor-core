@@ -64,6 +64,23 @@ def fast_forward_blockers(
     return []
 
 
+def ignored_cleanup_blockers(path: Path, timeout: int = 45) -> list[str]:
+    """Inspect a cleanup target without expanding ignored directory contents.
+
+    Keep this evidence separate from ordinary scan errors: ignored build output
+    blocks deletion, but does not make unrelated fast-forwards unsafe.
+    """
+    ignored = run_command(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard",
+         "--directory", "--no-empty-directory", "-z", "--", "."],
+        cwd=path, timeout=timeout,
+    )
+    if ignored.returncode != 0:
+        return ["ignored-file inspection failed; cleanup safety unknown"]
+    return [f"ignored files require preservation before cleanup: {name}"
+            for name in ignored.stdout.split("\0") if name]
+
+
 def cleanup_blockers(path: Path, runner=None, timeout: int = 45) -> list[str]:
     """Fail closed on saved work and nested repositories needing separate proof.
 
@@ -423,6 +440,14 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
             break
     repo.linked_worktrees, worktree_errors = _scan_linked_worktrees(path, default_ref, config)
     repo.errors.extend(worktree_errors)
+    linked_branches = {worktree.branch for worktree in repo.linked_worktrees}
+    if any(
+        not branch.current and branch.name != repo.default_branch
+        and branch.name not in linked_branches
+        and branch.merged_to_default and branch.unique_commit_count == 0
+        for branch in repo.branches
+    ):
+        repo.cleanup_blockers = ignored_cleanup_blockers(path, config.command_timeout_seconds)
     return repo
 
 
@@ -670,6 +695,10 @@ def _inspect_linked_worktree(
     state.unique_commit_count = _unique_commit_count(
         worktree_path, f"refs/remotes/{default_ref}", "HEAD", config, errors=state.errors,
     )
+    if state.upstream_gone and state.tree_matches_default and state.unique_commit_count == 0:
+        state.cleanup_blockers = ignored_cleanup_blockers(
+            worktree_path, config.command_timeout_seconds,
+        )
     return state
 
 

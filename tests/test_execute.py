@@ -130,7 +130,7 @@ class ActionExecutorFixtureTests(unittest.TestCase):
                 fake.mutating_calls(),
                 [
                     ["git", "branch", "-d", "old-docs"],
-                    ["git", "pull", "--ff-only"],
+                    ["git", "merge", "--ff-only", "--no-overwrite-ignore", "bbb222"],
                 ],
             )
             ledger_lines = _ledger_lines(ledger_path)
@@ -315,7 +315,13 @@ def _add_fast_forward(
     after: str,
 ) -> None:
     _add_fast_forward_verify(fake, status=status, before=before)
-    fake.add(["git", "pull", "--ff-only"], stdout="updated")
+    fake.add(["git", "rev-parse", "--verify", "@{upstream}^{commit}"], stdout=after)
+    fake.add(
+        ["git", "diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+         "--name-only", "--diff-filter=A", "-z", before, after, "--"],
+        stdout="",
+    )
+    fake.add(["git", "merge", "--ff-only", "--no-overwrite-ignore", after], stdout="updated")
     fake.add(["git", "rev-parse", "HEAD"], stdout=after)
 
 
@@ -506,6 +512,7 @@ def _is_mutating(args: list[str]) -> bool:
     return (
         args[:3] == ["git", "branch", "-d"]
         or args == ["git", "pull", "--ff-only"]
+        or args[:4] == ["git", "merge", "--ff-only", "--no-overwrite-ignore"]
         or args[:3] == ["gh", "pr", "merge"]
         or args[:3] == ["gh", "pr", "ready"]
     )

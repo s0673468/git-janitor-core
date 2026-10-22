@@ -48,6 +48,7 @@ class LinkedWorktreeState:
     tracking_configured: bool | None = None
     tracking_remote: str | None = None
     tracking_merge: str | None = None
+    cleanup_blockers: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -75,6 +76,7 @@ class RepoState:
     tracking_configured: bool | None = None
     tracking_remote: str | None = None
     tracking_merge: str | None = None
+    cleanup_blockers: list[str] = field(default_factory=list)
 
 
 @dataclass

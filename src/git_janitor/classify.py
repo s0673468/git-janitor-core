@@ -166,7 +166,8 @@ def classify_repo(
                 ))
         if branch.name == repo.default_branch:
             continue
-        if branch.merged_to_default and branch.unique_commit_count == 0 and not repo.errors:
+        if (branch.merged_to_default and branch.unique_commit_count == 0
+                and not repo.errors and not repo.ignored_files and not repo.cleanup_blockers):
             findings.append(
                 Finding(
                     severity="low",
@@ -251,14 +252,18 @@ def _classify_stale_linked_worktree(
     base = worktree.default_ref or repo.default_ref or repo.default_branch
     branch = worktree.branch or "unknown branch"
     upstream = worktree.upstream or "unknown upstream"
+    clean = not (worktree.dirty_files or worktree.untracked_files
+                 or worktree.ignored_files or worktree.cleanup_blockers)
     detail = (
         f"{branch} tracks {upstream} [gone] at {worktree.path}; "
-        f"clean={not worktree.dirty_files and not worktree.untracked_files}, "
+        f"clean={clean}, "
         f"tree_matches_{base}={worktree.tree_matches_default}, "
         f"unique_commit_count={worktree.unique_commit_count}."
     )
     if worktree.errors:
         detail = f"{detail} Inspection errors: {'; '.join(worktree.errors)}."
+    if worktree.cleanup_blockers:
+        detail = f"{detail} Cleanup blockers: {'; '.join(worktree.cleanup_blockers)}."
 
     return Finding(
         severity="low" if exact_safe else "medium",
@@ -280,6 +285,8 @@ def _linked_worktree_exact_cleanup_conditions(worktree: LinkedWorktreeState) -> 
         and not worktree.errors
         and not worktree.dirty_files
         and not worktree.untracked_files
+        and not worktree.ignored_files
+        and not worktree.cleanup_blockers
         and worktree.tree_matches_default is True
         and worktree.unique_commit_count == 0
     )
