@@ -43,7 +43,9 @@ before an operator command. Branch preservation defaults to
 `~/.local/share/git-janitor/preservation`.
 
 Ordinary scans exclude ignored build output such as `.venv/` and `node_modules/`
-from dirty work. Cleanup checks include ignored files and override preferences
+from dirty work. Fast-forward checks inspect incoming tracked paths for local
+collisions; execution pins the inspected upstream commit and refuses to overwrite
+ignored files. Cleanup checks include ignored files and override preferences
 that hide untracked files or submodule changes. Repositories with stashes or submodules require manual
 preservation checks and are blocked from cleanup recommendations and deletion.
 

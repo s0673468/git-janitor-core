@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,45 @@ GITHUB_REMOTE_RE = re.compile(
 STATUS_FLAGS = ("--untracked-files=normal", "--ignore-submodules=none")
 # Deletion proofs must also account for files that Git would otherwise ignore.
 CLEANUP_STATUS_FLAGS = ("--untracked-files=all", "--ignored", "--ignore-submodules=none")
+
+
+def fast_forward_blockers(
+    path: Path, head: str, upstream: str, runner=None, timeout: int = 45,
+) -> list[str]:
+    """Check incoming additions without enumerating ignored local trees.
+
+    Ignored files are clean worktree state, but Git normally overwrites them
+    during a merge. Inspect only paths newly tracked by the target, including
+    file/directory and symlink obstructions in their parents. Execution must
+    also use --no-overwrite-ignore to protect files created after this check.
+    """
+    if runner is None:
+        runner = run_command
+    additions = runner(
+        ["git", "diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+         "--name-only", "--diff-filter=A", "-z", head, upstream, "--"],
+        path, timeout,
+    )
+    if additions.returncode != 0:
+        return ["incoming path inspection failed; fast-forward overwrite safety unknown"]
+    for name in additions.stdout.split("\0"):
+        if not name:
+            continue
+        parts = Path(name).parts
+        if Path(name).is_absolute() or ".." in parts:
+            return ["incoming path is invalid; fast-forward overwrite safety unknown"]
+        current = path
+        for index, part in enumerate(parts):
+            current = current / part
+            try:
+                mode = current.lstat().st_mode
+            except FileNotFoundError:
+                break
+            except OSError:
+                return ["incoming path inspection failed; fast-forward overwrite safety unknown"]
+            if index == len(parts) - 1 or not stat.S_ISDIR(mode):
+                return ["fast-forward would overwrite local files; preservation required"]
+    return []
 
 
 def cleanup_blockers(path: Path, runner=None, timeout: int = 45) -> list[str]:
@@ -363,6 +403,10 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
         repo.ahead = ahead
         repo.behind = behind
         repo.upstream = upstream
+        if behind and not ahead and upstream and repo.head_oid and not (dirty or untracked):
+            repo.errors.extend(fast_forward_blockers(
+                path, repo.head_oid, upstream, timeout=config.command_timeout_seconds,
+            ))
     else:
         repo.errors.append(status.stderr or "failed to read git status")
 

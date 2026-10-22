@@ -183,7 +183,9 @@ class ActionExecutor:
     def _preflight_fast_forward(self, decision: AutomationDecision) -> _Preflight:
         repo_name = _local_repo_name(decision)
         path = self._repo_path(repo_name)
-        command = ["git", "pull", "--ff-only"]
+        # Fetching belongs to the scan. Merge exactly the inspected local target;
+        # pull could fetch a different tree after the overwrite safety check.
+        command = ["git", "merge", "--ff-only", "--no-overwrite-ignore", "@{upstream}"]
         before_head = self._run(["git", "rev-parse", "HEAD"], path)
         branch = self._run(["git", "rev-parse", "--abbrev-ref", "HEAD"], path)
         status = self._run(
@@ -221,6 +223,17 @@ class ActionExecutor:
             behind=behind,
             upstream=upstream,
         )
+        if not detail:
+            target = self._run(["git", "rev-parse", "--verify", "@{upstream}^{commit}"], path)
+            if target.returncode != 0:
+                detail = "upstream target inspection failed; fast-forward safety unknown"
+            else:
+                before["target_head"] = target.stdout
+                command[-1] = target.stdout
+                detail = "; ".join(git.fast_forward_blockers(
+                    path, before_head.stdout, target.stdout, self.runner,
+                    self.config.command_timeout_seconds,
+                ))
         return _Preflight(command, str(path), before, before, _ff_rollback(before), detail)
 
     def _preflight_delete_branch(self, decision: AutomationDecision) -> _Preflight:
