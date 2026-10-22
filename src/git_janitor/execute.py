@@ -227,10 +227,11 @@ class ActionExecutor:
         repo_name, branch_name = _branch_target(decision)
         path = self._repo_path(repo_name)
         command = ["git", "branch", "-d", branch_name]
-        branch_ref = self._run(["git", "rev-parse", branch_name], path)
+        local_ref = f"refs/heads/{branch_name}"
+        branch_ref = self._run(["git", "show-ref", "--verify", "--hash", local_ref], path)
         current = self._run(["git", "rev-parse", "--abbrev-ref", "HEAD"], path)
         status = self._run(
-            ["git", "status", "--porcelain=v1", "--branch", "--untracked-files=normal"],
+            ["git", "status", "--porcelain=v1", "--branch", *git.CLEANUP_STATUS_FLAGS],
             path,
         )
         default_ref = _evidence_value(decision, "default_ref") or f"origin/{self.config.default_branch}"
@@ -258,7 +259,19 @@ class ActionExecutor:
         if detail:
             return _Preflight(command, str(path), before, before, _branch_rollback(before), detail)
 
-        merged = self._run(["git", "merge-base", "--is-ancestor", branch_name, default_ref], path)
+        blockers = git.cleanup_blockers(path, self.runner, self.config.command_timeout_seconds)
+        if blockers:
+            return _Preflight(command, str(path), before, before, _branch_rollback(before), "; ".join(blockers))
+
+        worktrees = self._run(["git", "worktree", "list", "--porcelain"], path)
+        if worktrees.returncode != 0 or any(
+            entry.branch == branch_name for entry in git.parse_worktree_porcelain(worktrees.stdout)
+        ):
+            return _Preflight(command, str(path), before, before, _branch_rollback(before),
+                              "branch checkout ownership is active or unknown")
+
+        comparison_ref = f"refs/remotes/{default_ref}"
+        merged = self._run(["git", "merge-base", "--is-ancestor", local_ref, comparison_ref], path)
         if merged.returncode != 0:
             return _Preflight(
                 command,
@@ -268,7 +281,7 @@ class ActionExecutor:
                 _branch_rollback(before),
                 "branch is no longer merged to the default ref",
             )
-        cherry = self._run(["git", "cherry", "-v", default_ref, branch_name], path)
+        cherry = self._run(["git", "cherry", "-v", comparison_ref, local_ref], path)
         if cherry.returncode != 0:
             return _Preflight(
                 command,

@@ -18,6 +18,34 @@ GITHUB_REMOTE_RE = re.compile(
     r"(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$"
 )
 
+# Cleanup checks must override preferences that hide local files or submodule dirt.
+CLEANUP_STATUS_FLAGS = ("--untracked-files=all", "--ignored", "--ignore-submodules=none")
+
+
+def cleanup_blockers(path: Path, runner=None, timeout: int = 45) -> list[str]:
+    """Fail closed on saved work and nested repositories needing separate proof.
+
+    Stash subjects are not a reliable branch identity (and can contain private
+    text). Inspect only object IDs and conservatively preserve all stashed work.
+    A superproject's status cannot prove ignored files or unpublished commits in
+    its submodules are preserved, even with --ignore-submodules=none.
+    """
+    if runner is None:
+        def runner(args, cwd, timeout):
+            return run_command(args, cwd=cwd, timeout=timeout)
+    errors: list[str] = []
+    stashes = runner(["git", "stash", "list", "--format=%H"], path, timeout)
+    if stashes.returncode != 0:
+        errors.append("stash inspection failed; cleanup safety unknown")
+    elif stashes.stdout:
+        errors.append("stashed work requires preservation before cleanup")
+    index = runner(["git", "ls-files", "--stage", "-z"], path, timeout)
+    if index.returncode != 0:
+        errors.append("submodule inspection failed; cleanup safety unknown")
+    elif any(record.startswith("160000 ") for record in index.stdout.split("\0")):
+        errors.append("submodules require separate preservation proof before cleanup")
+    return errors
+
 
 @dataclass(frozen=True)
 class WorktreeEntry:
@@ -267,12 +295,14 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
         repo.github_repo = parse_github_remote(remote.stdout)
 
     branch = run_command(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        ["git", "symbolic-ref", "--quiet", "HEAD"],
         cwd=path,
         timeout=config.command_timeout_seconds,
     )
     if branch.returncode == 0:
-        repo.current_branch = branch.stdout
+        repo.current_branch = branch.stdout.removeprefix("refs/heads/")
+    elif branch.returncode == 1:
+        repo.current_branch = "HEAD"
     else:
         repo.errors.append(branch.stderr or "failed to identify current branch")
 
@@ -289,7 +319,7 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
     default_ref = _default_ref(path, config)
     if default_ref:
         default_head = run_command(
-            ["git", "rev-parse", "--verify", default_ref],
+            ["git", "rev-parse", "--verify", f"refs/remotes/{default_ref}"],
             cwd=path,
             timeout=config.command_timeout_seconds,
         )
@@ -308,7 +338,7 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
         )
 
     status = run_command(
-        ["git", "status", "--porcelain=v1", "--branch", "--untracked-files=normal"],
+        ["git", "status", "--porcelain=v1", "--branch", *CLEANUP_STATUS_FLAGS],
         cwd=path,
         timeout=config.command_timeout_seconds,
     )
@@ -321,6 +351,8 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
         repo.upstream = upstream
     else:
         repo.errors.append(status.stderr or "failed to read git status")
+
+    repo.errors.extend(cleanup_blockers(path, timeout=config.command_timeout_seconds))
 
     repo.branches = _scan_branches(
         path, default_ref, repo.current_branch, config, errors=repo.errors,
@@ -338,16 +370,16 @@ def scan_repo(path: Path, config: ScannerConfig) -> RepoState:
 
 def _default_ref(path: Path, config: ScannerConfig) -> str | None:
     origin_head = run_command(
-        ["git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        ["git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
         cwd=path,
         timeout=config.command_timeout_seconds,
     )
-    if origin_head.returncode == 0 and origin_head.stdout:
-        return origin_head.stdout
+    if origin_head.returncode == 0 and origin_head.stdout.startswith("refs/remotes/origin/"):
+        return origin_head.stdout.removeprefix("refs/remotes/")
 
     fallback = f"origin/{config.default_branch}"
     exists = run_command(
-        ["git", "rev-parse", "--verify", "--quiet", fallback],
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/{fallback}"],
         cwd=path,
         timeout=config.command_timeout_seconds,
     )
@@ -418,7 +450,7 @@ def _scan_branches(
         [
             "git",
             "for-each-ref",
-            "--format=%(refname:short)|%(upstream:short)|%(committerdate:iso8601)|%(subject)",
+            "--format=%(refname:lstrip=2)%00%(upstream:short)%00%(committerdate:iso8601)%00%(subject)",
             "refs/heads",
         ],
         cwd=path,
@@ -431,8 +463,10 @@ def _scan_branches(
             return []
 
     branches: list[BranchState] = []
-    for line in branches_raw.stdout.splitlines():
-        name, upstream, date, subject = (line.split("|", 3) + ["", "", "", ""])[:4]
+    for line in branches_raw.stdout.split("\n"):
+        if not line:
+            continue
+        name, upstream, date, subject = (line.split("\0", 3) + ["", "", "", ""])[:4]
         state = BranchState(
             name=name,
             upstream=upstream or None,
@@ -480,8 +514,12 @@ def _scan_branches(
             inspection_errors,
         )
         if default_ref and name != default_ref:
-            state.merged_to_default = _is_ancestor(path, name, default_ref, config, errors=errors)
-            state.unique_commit_count = _unique_commit_count(path, default_ref, name, config, errors=errors)
+            state.merged_to_default = _is_ancestor(
+                path, f"refs/heads/{name}", f"refs/remotes/{default_ref}", config, errors=errors,
+            )
+            state.unique_commit_count = _unique_commit_count(
+                path, f"refs/remotes/{default_ref}", f"refs/heads/{name}", config, errors=errors,
+            )
         branches.append(state)
     return branches
 
@@ -528,7 +566,7 @@ def _inspect_linked_worktree(
         state.errors.append("worktree is prunable; status and commit comparisons unknown")
         return state
     status = run_command(
-        ["git", "status", "--porcelain=v1", "--branch", "--untracked-files=normal"],
+        ["git", "status", "--porcelain=v1", "--branch", *CLEANUP_STATUS_FLAGS],
         cwd=worktree_path,
         timeout=config.command_timeout_seconds,
     )
@@ -543,6 +581,7 @@ def _inspect_linked_worktree(
     state.ahead = ahead
     state.behind = behind
     state.upstream_gone = status_upstream_gone(status.stdout)
+    state.errors.extend(cleanup_blockers(worktree_path, timeout=config.command_timeout_seconds))
     if entry.branch:
         state.tracking_configured, state.tracking_remote, state.tracking_merge = (
             _tracking_configuration(worktree_path, entry.branch, config, state.errors)
@@ -557,7 +596,7 @@ def _inspect_linked_worktree(
         return state
 
     tree_diff = run_command(
-        ["git", "diff", "--quiet", default_ref, "HEAD"],
+        ["git", "diff", "--quiet", f"refs/remotes/{default_ref}", "HEAD"],
         cwd=worktree_path,
         timeout=config.command_timeout_seconds,
     )
@@ -569,7 +608,7 @@ def _inspect_linked_worktree(
         state.errors.append(tree_diff.stderr or "failed to compare linked worktree tree")
 
     state.unique_commit_count = _unique_commit_count(
-        worktree_path, default_ref, "HEAD", config, errors=state.errors,
+        worktree_path, f"refs/remotes/{default_ref}", "HEAD", config, errors=state.errors,
     )
     return state
 

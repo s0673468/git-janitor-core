@@ -224,12 +224,13 @@ def decide_branch_cleanup(
             evidence=tuple(repo.dirty_files + repo.untracked_files),
         )
 
-    if branch.current or branch.name == repo.default_branch:
+    if (branch.current or branch.name == repo.default_branch
+            or any(worktree.branch == branch.name for worktree in repo.linked_worktrees)):
         return AutomationDecision(
             disposition=NO_OP,
             category="protected-branch",
             title=f"{label} is not a cleanup target",
-            reason="The branch is current or is the default branch.",
+            reason="The branch is checked out or is the default branch.",
             recommended_action="Leave the branch unchanged.",
             evidence=evidence,
         )
