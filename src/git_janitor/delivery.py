@@ -95,6 +95,13 @@ def finish_delivery(
                 raise DeliveryBlocked("locked or prunable worktree preserved")
             if any((worktree / name).exists() for name in (".no-cleanup", ".git-janitor-preserve", ".understand-anything")):
                 raise DeliveryBlocked("worktree preservation marker present")
+            # Both status and worktree remove trust these index flags, so even
+            # Git's non-forced removal can silently discard modified tracked files.
+            # Refuse flagged entries rather than clearing user index preferences.
+            index = run(["git", "ls-files", "-v", "-z"], worktree)
+            if any(row and (row[0] == "S" or row[0].islower())
+                   for row in index.split("\0")):
+                raise DeliveryBlocked("task index hides tracked state; preserve skip-worktree/assume-unchanged files")
             if run(["git", "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching"], worktree):
                 raise DeliveryBlocked("dirty or ignored task-local state preserved")
 
@@ -133,7 +140,10 @@ def finish_delivery(
                                 f":(exclude,literal){worktree.relative_to(checkout).as_posix()}"]
             if run(status_args, checkout):
                 raise DeliveryBlocked("dirty default checkout preserved")
-            run(["git", "merge", "--ff-only", remote_head], checkout)
+            # Git otherwise overwrites ignored files when incoming history starts
+            # tracking their paths. Keep this guard on the mutation itself, too,
+            # so files created after the status check are protected.
+            run(["git", "merge", "--ff-only", "--no-overwrite-ignore", remote_head], checkout)
         if not default_paths and local_head != remote_head:
             run(["git", "update-ref", f"refs/heads/{default}", remote_head, local_head], root)
         evidence["synced_default"] = remote_head
