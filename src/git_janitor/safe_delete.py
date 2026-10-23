@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import fcntl
 import json
 import os
 from pathlib import Path
+import shutil
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -307,22 +309,34 @@ def preserve_branch(
     safe_branch = branch.replace("/", "-")
     bundle = output_dir / f"{repo_name}-{safe_branch}.bundle"
     manifest = output_dir / f"{repo_name}-{safe_branch}.md"
-    # Colliding runs serialize, so none can pass the overwrite check and then be
-    # overwritten. Not "<bundle>.lock": git bundle create uses that name itself.
+    # Lock the directory inode: the kernel releases this lock even after a crash,
+    # so the next run can recover publication without removing a live run's lock.
+    # Keep respecting lock files left by older versions of the tool.
     lock = output_dir / f"{repo_name}-{safe_branch}.preserve-lock"
     try:
-        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
-    except FileExistsError:
-        return {"ok": False, "error": f"preservation in progress: {lock} exists; remove it only if no run is active"}
+        directory_fd = os.open(output_dir, os.O_RDONLY | os.O_DIRECTORY)
     except OSError as exc:
         return {"ok": False, "error": f"cannot lock preservation {bundle}: {exc}"}
     try:
+        try:
+            fcntl.flock(directory_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return {"ok": False, "error": f"preservation in progress in {output_dir}"}
+        if lock.exists() or lock.is_symlink():
+            return {"ok": False, "error": f"preservation in progress: {lock} exists; remove it only if no run is active"}
+        # Recover before reading the branch or checking saved history. In
+        # particular, even a now-deleted or rewritten branch cannot strand a pair.
+        journal = bundle.with_suffix(".preserve-journal")
+        if journal.exists() or journal.is_symlink():
+            _finish_preservation_publication(journal, bundle, manifest)
         return _preserve_locked(
             branch, repo_path=repo_path, reason=reason, validation=validation,
             repo_name=repo_name, bundle=bundle, manifest=manifest, runner=runner,
         )
+    except OSError as exc:
+        return {"ok": False, "error": f"preservation publication failed; retry to recover: {exc}"}
     finally:
-        lock.unlink(missing_ok=True)
+        os.close(directory_fd)
 
 
 def _preserve_locked(
@@ -336,7 +350,7 @@ def _preserve_locked(
     manifest: Path,
     runner: Runner,
 ) -> dict[str, Any]:
-    head = runner(["git", "rev-parse", branch], repo_path, 30)
+    head = runner(["git", "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}"], repo_path, 30)
     if head.returncode != 0:
         return {"ok": False, "error": head.stderr or "branch not found"}
     if bundle.exists():
@@ -344,21 +358,31 @@ def _preserve_locked(
         if conflict:
             return {"ok": False, "error": conflict}
     try:
-        # Validate both candidates before replacing any previous preservation.
-        # Keep staging on the same filesystem so each publication is a rename,
-        # including the manifest: opening its final path would follow symlinks
-        # and truncate hard-linked files unrelated to this preservation.
+        # Stage and verify the whole pair before publishing a recoverable journal.
         with TemporaryDirectory(prefix=f".{bundle.stem}-", dir=bundle.parent) as staging:
             pending_bundle = Path(staging) / bundle.name
             pending_manifest = Path(staging) / manifest.name
             bundle_result = runner(
-                ["git", "bundle", "create", str(pending_bundle), branch], repo_path, 120,
+                ["git", "bundle", "create", str(pending_bundle), f"refs/heads/{branch}"],
+                repo_path, 120,
             )
             if bundle_result.returncode != 0:
                 return {"ok": False, "error": bundle_result.stderr or "bundle create failed"}
             verify = runner(["git", "bundle", "verify", str(pending_bundle)], repo_path, 120)
             if verify.returncode != 0:
                 return {"ok": False, "error": verify.stderr or "bundle verify failed"}
+            listed = runner(["git", "bundle", "list-heads", str(pending_bundle)], repo_path, 120)
+            if listed.returncode != 0 or listed.stdout.split() != [head.stdout, f"refs/heads/{branch}"]:
+                return {"ok": False, "error": "branch moved during preservation; retry with its new head"}
+            # Compare-and-swap the inspected ref to itself. Together with the
+            # bundle head check, this pins both artifacts to the commit whose
+            # ancestry was checked, even if the branch moves after this CAS.
+            pinned = runner(
+                ["git", "update-ref", "--no-deref", f"refs/heads/{branch}", head.stdout, head.stdout],
+                repo_path, 30,
+            )
+            if pinned.returncode != 0:
+                return {"ok": False, "error": "branch moved during preservation; retry: " + pinned.stderr}
             pending_manifest.write_text(
                 "\n".join(
                     [
@@ -384,10 +408,18 @@ def _preserve_locked(
                 and pending_manifest.stat().st_size > 0
             )
             if ok:
-                pending_bundle.replace(bundle)
-                pending_manifest.replace(manifest)
+                for artifact in (pending_bundle, pending_manifest):
+                    with artifact.open("rb") as handle:
+                        os.fsync(handle.fileno())
+                _sync_preservation_directory(Path(staging))
+                journal = bundle.with_suffix(".preserve-journal")
+                # One atomic rename makes BOTH durable candidates recoverable.
+                # TemporaryDirectory only owns the old name after this point.
+                Path(staging).rename(journal)
+                _sync_preservation_directory(bundle.parent)
+                _finish_preservation_publication(journal, bundle, manifest)
     except OSError as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": f"preservation publication failed; retry to recover: {exc}"}
     return {
         "ok": ok,
         "bundle": str(bundle),
@@ -396,6 +428,42 @@ def _preserve_locked(
         "verify": verify.stdout or verify.stderr,
         "error": "" if ok else "bundle or manifest missing/empty after write",
     }
+
+
+def _sync_preservation_directory(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _finish_preservation_publication(journal: Path, bundle: Path, manifest: Path) -> None:
+    """Replay publication under the directory lock, including after process death.
+
+    Journal originals survive both renames. Only after both destination entries
+    are durable do we remove the journal manifest (the completion marker), then
+    clean up. A crash during cleanup can therefore also be recovered safely.
+    """
+    if journal.is_symlink() or not journal.is_dir():
+        raise OSError(f"invalid preservation journal: {journal}")
+    saved_manifest = journal / manifest.name
+    if saved_manifest.exists():
+        for destination in (bundle, manifest):
+            source = journal / destination.name
+            if source.is_symlink() or not source.is_file():
+                raise OSError(f"incomplete preservation journal: {journal}")
+            # Keep a durable original in the journal until BOTH outputs exist.
+            # Rename replaces aliases instead of writing through them.
+            pending = source.with_name(source.name + ".publish")
+            pending.unlink(missing_ok=True)
+            os.link(source, pending)
+            pending.replace(destination)
+            _sync_preservation_directory(destination.parent)
+        saved_manifest.unlink()
+        _sync_preservation_directory(journal)
+    shutil.rmtree(journal)
+    _sync_preservation_directory(bundle.parent)
 
 
 def _existing_bundle_conflict(
