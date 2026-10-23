@@ -42,6 +42,15 @@ exact-head tests, dirty-worktree guards, and append-only receipts. Read `--help`
 before an operator command. Branch preservation defaults to
 `~/.local/share/git-janitor/preservation`.
 
+Preservation checks the bundle against the inspected branch commit and uses a
+compare-and-swap on the branch to refuse concurrent movement. Existing bundles
+can only be replaced by history that contains their saved commit. Bundle and
+manifest publication uses a durable `.preserve-journal` directory: after an
+interruption, rerun `preserve-branch` with the same output directory and branch to
+finish publication before any new preservation checks, even if the branch has
+since moved or disappeared. Keep the journal until recovery completes. Runs
+sharing an output directory serialize with a process-scoped directory lock.
+
 Ordinary scans exclude ignored build output such as `.venv/` and `node_modules/`
 from dirty work. Fast-forward checks inspect incoming tracked paths for local
 collisions; execution pins the inspected upstream commit and refuses to overwrite
