@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from .git import (
@@ -342,50 +343,58 @@ def _preserve_locked(
         conflict = _existing_bundle_conflict(bundle, branch, head.stdout, repo_path, runner)
         if conflict:
             return {"ok": False, "error": conflict}
-    bundle_result =runner(["git", "bundle", "create", str(bundle), branch], repo_path, 120)
-    if bundle_result.returncode != 0:
-        return {"ok": False, "error": bundle_result.stderr or "bundle create failed"}
-    verify = runner(["git", "bundle", "verify", str(bundle)], repo_path, 120)
-    if verify.returncode != 0:
-        return {"ok": False, "error": verify.stderr or "bundle verify failed"}
     try:
-        manifest.write_text(
-            "\n".join(
-                [
-                    f"# Preserved branch: {repo_name}/{branch}",
-                    "",
-                    f"- repo: {repo_path}",
-                    f"- branch: {branch}",
-                    f"- worktree_path: {repo_path}",
-                    f"- commit: {head.stdout}",
-                    "- pr_mapping: not checked",
-                    f"- preserved_at: {datetime.now(timezone.utc).replace(microsecond=0).isoformat()}",
-                    f"- reason: {reason}",
-                    f"- validation: {validation}",
-                    f"- bundle: {bundle}",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
-        )
-        ok = (
-            bundle.exists()
-            and bundle.stat().st_size > 0
-            and manifest.exists()
-            and manifest.stat().st_size > 0
-        )
+        # Validate both candidates before replacing any previous preservation.
+        # Keep staging on the same filesystem so each publication is a rename,
+        # including the manifest: opening its final path would follow symlinks
+        # and truncate hard-linked files unrelated to this preservation.
+        with TemporaryDirectory(prefix=f".{bundle.stem}-", dir=bundle.parent) as staging:
+            pending_bundle = Path(staging) / bundle.name
+            pending_manifest = Path(staging) / manifest.name
+            bundle_result = runner(
+                ["git", "bundle", "create", str(pending_bundle), branch], repo_path, 120,
+            )
+            if bundle_result.returncode != 0:
+                return {"ok": False, "error": bundle_result.stderr or "bundle create failed"}
+            verify = runner(["git", "bundle", "verify", str(pending_bundle)], repo_path, 120)
+            if verify.returncode != 0:
+                return {"ok": False, "error": verify.stderr or "bundle verify failed"}
+            pending_manifest.write_text(
+                "\n".join(
+                    [
+                        f"# Preserved branch: {repo_name}/{branch}",
+                        "",
+                        f"- repo: {repo_path}",
+                        f"- branch: {branch}",
+                        f"- worktree_path: {repo_path}",
+                        f"- commit: {head.stdout}",
+                        "- pr_mapping: not checked",
+                        f"- preserved_at: {datetime.now(timezone.utc).replace(microsecond=0).isoformat()}",
+                        f"- reason: {reason}",
+                        f"- validation: {validation}",
+                        f"- bundle: {bundle}",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            ok = (
+                pending_bundle.exists()
+                and pending_bundle.stat().st_size > 0
+                and pending_manifest.stat().st_size > 0
+            )
+            if ok:
+                pending_bundle.replace(bundle)
+                pending_manifest.replace(manifest)
     except OSError as exc:
-        ok = False
-        write_error = str(exc)
-    else:
-        write_error = ""
+        return {"ok": False, "error": str(exc)}
     return {
         "ok": ok,
         "bundle": str(bundle),
         "manifest": str(manifest),
         "commit": head.stdout,
         "verify": verify.stdout or verify.stderr,
-        "error": "" if ok else (write_error or "bundle or manifest missing/empty after write"),
+        "error": "" if ok else "bundle or manifest missing/empty after write",
     }
 
 

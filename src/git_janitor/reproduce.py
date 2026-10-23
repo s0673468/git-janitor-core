@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import fields
+from itertools import combinations
 import json
 from pathlib import Path
 
@@ -77,8 +78,21 @@ def main(argv=None) -> int:
     parser.add_argument("--json-out", type=Path)
     args = parser.parse_args(argv)
     outputs = [args.out, *([args.json_out] if args.json_out else [])]
-    if args.snapshot.resolve() in {path.resolve() for path in outputs} or len({path.resolve() for path in outputs}) != len(outputs):
-        parser.error("Snapshot and output paths must be distinct; preserve the original snapshot")
+    try:
+        for left, right in combinations([args.snapshot, *outputs], 2):
+            # resolve() catches lexical/symlink aliases; samefile() also catches
+            # hard links, which otherwise let a write destroy the input snapshot
+            # or silently replace one output with the other.
+            aliased = left.resolve() == right.resolve()
+            if not aliased:
+                try:
+                    aliased = left.samefile(right)
+                except FileNotFoundError:
+                    pass  # A new output has no existing inode to alias.
+            if aliased:
+                parser.error("Snapshot and output paths must be distinct; preserve the original snapshot")
+    except (OSError, RuntimeError) as exc:
+        parser.error(f"Cannot establish distinct snapshot and output paths: {exc}")
     try:
         report = restore_report(json.loads(args.snapshot.read_text(encoding="utf-8")))
         markdown = render_markdown(report)
