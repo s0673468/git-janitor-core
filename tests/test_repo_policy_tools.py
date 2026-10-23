@@ -2643,9 +2643,17 @@ class SafeDeleteTests(FixtureOwnerTests):
 
     def test_preserve_branch_writes_verified_bundle_and_manifest(self) -> None:
         fake = FakeRunner()
-        fake.add(["git", "rev-parse", "old-docs"], stdout="abc123")
+        head = "a" * 40
+        fake.add(
+            ["git", "rev-parse", "--verify", "refs/heads/old-docs^{commit}"], stdout=head,
+        )
         fake.add_bundle_create(["git", "bundle", "create"], contents="bundle data")
         fake.add(["git", "bundle", "verify"], stdout="ok", prefix=True)
+        fake.add(
+            ["git", "bundle", "list-heads"],
+            stdout=f"{head} refs/heads/old-docs", prefix=True,
+        )
+        fake.add(["git", "update-ref", "--no-deref", "refs/heads/old-docs", head, head])
         with tempfile.TemporaryDirectory() as tmp:
             result = preserve_branch(
                 "old-docs",
