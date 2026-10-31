@@ -1,13 +1,14 @@
 """Explicit, resumable PR delivery; no scanner/autonomous cleanup entry point."""
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 import re
 from typing import Any
 
 from .git import parse_github_remote, parse_worktree_porcelain, run_command
-from .safe_delete import evaluate_delete
+from .safe_delete import branch_operation_proof, evaluate_delete
 
 
 class DeliveryBlocked(RuntimeError):
@@ -160,6 +161,8 @@ def finish_delivery(
             owned_worktree=worktree if worktree.exists() else None,
             expected_head=expected_head, verified_merge_commit=merge_sha,
         )
+        proof = replace(proof, proofs=(*proof.proofs,
+                        branch_operation_proof(branch, repo_path=root, runner=runner)))
         evidence["cleanup_proof"] = proof.as_dict()
         if not proof.passed:
             raise DeliveryBlocked("branch cleanup proof incomplete; preserved (see ledger)")
@@ -174,6 +177,11 @@ def finish_delivery(
             raise DeliveryBlocked("branch was claimed by another worktree; local ref preserved")
         if run(["git", "rev-parse", "--verify", f"refs/heads/{branch}"], root) != expected_head:
             raise DeliveryBlocked("branch advanced during cleanup; local ref preserved")
+        operation = branch_operation_proof(branch, repo_path=root, runner=runner)
+        proof = replace(proof, proofs=(*proof.proofs, operation))
+        evidence["cleanup_proof"] = proof.as_dict()
+        if not operation.passed:
+            raise DeliveryBlocked(operation.detail)
         run(proof.command, root)
         if worktree.exists():
             raise DeliveryBlocked("worktree removal readback failed")
@@ -192,7 +200,8 @@ def finish_delivery(
             listing = runner(["git", "worktree", "list", "--porcelain"], root, 30)
             remaining = runner(["git", "rev-parse", "--verify", f"refs/heads/{branch}"], root, 30)
             if (listing.returncode == 0 and remaining.returncode == 0
-                    and not any(entry.branch == branch for entry in parse_worktree_porcelain(listing.stdout))):
+                    and not any(entry.branch == branch for entry in parse_worktree_porcelain(listing.stdout))
+                    and branch_operation_proof(branch, repo_path=root, runner=runner).passed):
                 restored = runner(["git", "worktree", "add", str(worktree), branch], root, 60)
                 evidence["worktree_restored"] = restored.returncode == 0
                 if restored.returncode == 0:

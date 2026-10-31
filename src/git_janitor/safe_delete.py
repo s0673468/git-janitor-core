@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from contextlib import ExitStack
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import fcntl
 import json
 import os
 from pathlib import Path
+import stat
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -60,6 +62,60 @@ class DeleteReport:
         }
 
 
+def branch_operation_proof(branch: str, *, repo_path: Path, runner: Runner = run_command) -> Proof:
+    """A detached rebase or bisect can still own its original branch."""
+    name = "no_branch_operation"
+    listing = runner(["git", "worktree", "list", "--porcelain"], repo_path, 30)
+    entries = parse_worktree_porcelain(listing.stdout)
+    if listing.returncode != 0 or not entries:
+        return _proof(name, False, "cannot inspect worktrees for branch operations")
+    markers = ("rebase-merge/head-name", "rebase-apply/head-name", "BISECT_START")
+    for entry in entries:
+        result = runner(["git", "rev-parse", "--absolute-git-dir"], Path(entry.path), 30)
+        git_dir = Path(result.stdout.strip())
+        try:
+            available = (result.returncode == 0 and git_dir.is_absolute()
+                         and git_dir == git_dir.resolve(strict=True) and git_dir.is_dir())
+        except (OSError, ValueError, RuntimeError):
+            available = False
+        if not available:
+            return _proof(name, False, f"cannot inspect operation git dir for {entry.path}")
+        for marker in markers:
+            try:
+                # Open state directories relative to qualified descriptors so
+                # neither a state file nor a parent alias redirects the read.
+                with ExitStack() as opened:
+                    parent = os.open(git_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    opened.callback(os.close, parent)
+                    parts = Path(marker).parts
+                    for part in parts[:-1]:
+                        parent = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                         dir_fd=parent)
+                        opened.callback(os.close, parent)
+                    fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                 dir_fd=parent)
+                    with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                            return _proof(name, False, f"invalid {marker} in {entry.path}")
+                        raw = handle.read(8193)
+                target = raw.removesuffix("\n")
+                if (len(raw) > 8192 or not target
+                        or any(ord(ch) < 32 or ord(ch) == 127 for ch in target)):
+                    return _proof(name, False, f"invalid {marker} in {entry.path}")
+            except FileNotFoundError:
+                continue
+            except (OSError, UnicodeError):
+                return _proof(name, False, f"cannot read {marker} in {entry.path}")
+            valid = runner(["git", "check-ref-format",
+                            f"refs/heads/{target.removeprefix('refs/heads/')}"], repo_path, 30)
+            if valid.returncode != 0:
+                return _proof(name, False, f"invalid {marker} in {entry.path}")
+            # Rebase stores a full ref; BISECT_START normally saves its short name.
+            if target in (branch, f"refs/heads/{branch}"):
+                return _proof(name, False, f"{branch} has {marker} in {entry.path}")
+    return _proof(name, True, "no rebase or bisect owns the branch in any worktree")
+
+
 def git_safe_delete_main(argv: list[str] | None = None, *, runner: Runner = run_command) -> int:
     parser = argparse.ArgumentParser(description="Safely delete a proved-merged local branch.")
     parser.add_argument("branch")
@@ -68,6 +124,9 @@ def git_safe_delete_main(argv: list[str] | None = None, *, runner: Runner = run_
     parser.add_argument("--ledger", type=Path, default=DEFAULT_DELETE_LEDGER)
     args = parser.parse_args(argv)
     report = evaluate_delete(args.branch, repo_path=args.repo, runner=runner)
+    if report.passed and report.command[:3] == ["git", "update-ref", "-d"]:
+        operation = branch_operation_proof(report.branch, repo_path=args.repo, runner=runner)
+        report = replace(report, proofs=(*report.proofs, operation))
     print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
     if not report.passed:
         append_ledger(args.ledger, report=report, status="blocked", exit_code=None, detail="proof failed")
