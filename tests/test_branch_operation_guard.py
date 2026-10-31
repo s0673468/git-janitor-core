@@ -53,7 +53,7 @@ class BranchOperationGuardTests(unittest.TestCase):
             f.git("switch", "codex/task")
         return f, operation
 
-    def start_operation(self, f, worktree, operation):
+    def start_operation(self, f, worktree, operation, *, rebase_owner="refs/heads/codex/task"):
         git_dir = Path(f.git("rev-parse", "--absolute-git-dir", cwd=worktree))
         if operation == "rebase":
             editor = f.root.parent / "edit-first.py"
@@ -61,7 +61,7 @@ class BranchOperationGuardTests(unittest.TestCase):
                               "p.write_text(p.read_text().replace('pick ', 'edit ', 1))\n")
             command = f"{shlex.quote(sys.executable)} {shlex.quote(str(editor))}"
             f.git("-c", f"sequence.editor={command}", "rebase", "-i", f.base, cwd=worktree)
-            self.assertEqual((git_dir / "rebase-merge/head-name").read_text(), "refs/heads/codex/task\n")
+            self.assertEqual((git_dir / "rebase-merge/head-name").read_text(), rebase_owner + "\n")
         else:
             f.git("bisect", "start", "HEAD", f.base, cwd=worktree)
             self.assertEqual((git_dir / "BISECT_START").read_text(), "codex/task\n")
@@ -209,3 +209,58 @@ class BranchOperationGuardTests(unittest.TestCase):
                 marker.write_text(owner + "\n")
                 proof = safe_delete.branch_operation_proof("codex/task", repo_path=f.root, runner=f.runner)
                 self.assertTrue(proof.passed, proof)
+
+    def test_rebase_started_detached_allows_unrelated_branch_cleanup(self):
+        for linked in (False, True):
+            with self.subTest(linked=linked):
+                f, worktree = self.fixture(linked=linked, outside=True)
+                f.git("switch", "--detach", cwd=worktree)
+                self.start_operation(f, worktree, "rebase", rebase_owner="detached HEAD")
+                git_dir = Path(f.git("rev-parse", "--absolute-git-dir", cwd=worktree))
+                marker = git_dir / "rebase-merge/head-name"
+                before = marker.read_bytes()
+                for execute in (False, True):
+                    args = ["codex/task", "--repo", str(f.root), "--ledger", str(f.ledger)]
+                    if execute:
+                        args.append("--execute")
+                    with redirect_stdout(io.StringIO()):
+                        code = safe_delete.git_safe_delete_main(args, runner=f.runner)
+                    self.assertEqual(code, 0, f.ledger.read_text())
+                    self.assertEqual(marker.read_bytes(), before)
+                    self.assertEqual(f.git("rev-parse", "--abbrev-ref", "HEAD", cwd=worktree), "HEAD")
+                self.assertEqual(f.git("branch", "--list", "codex/task"), "")
+
+    def test_apply_rebase_started_detached_has_no_branch_owner(self):
+        for linked in (False, True):
+            with self.subTest(linked=linked):
+                f, worktree = self.fixture(linked=linked, outside=True)
+                upstream = f.root.parent / "upstream"
+                f.git("worktree", "add", "-b", "synthetic-upstream", str(upstream), f.base)
+                (upstream / "file.txt").write_text("conflicting upstream\n")
+                f.git("commit", "-am", "synthetic conflicting upstream", cwd=upstream)
+                target = f.git("rev-parse", "HEAD", cwd=upstream)
+                f.git("switch", "--detach", cwd=worktree)
+                result = safe_delete.run_command(["git", "rebase", "--apply", target], worktree, 30)
+                self.assertEqual(result.returncode, 1, result)
+                git_dir = Path(f.git("rev-parse", "--absolute-git-dir", cwd=worktree))
+                marker = git_dir / "rebase-apply/head-name"
+                self.assertEqual(marker.read_bytes(), b"detached HEAD\n")
+                proof = safe_delete.branch_operation_proof("codex/task", repo_path=f.root, runner=f.runner)
+                self.assertTrue(proof.passed, proof)
+                self.assertEqual(marker.read_bytes(), b"detached HEAD\n")
+                self.assertEqual(f.git("rev-parse", "refs/heads/codex/task"), f.head)
+
+    def test_no_owner_sentinel_is_exact_and_only_valid_for_rebase(self):
+        for marker_name in ("rebase-merge/head-name", "rebase-apply/head-name", "BISECT_START"):
+            with self.subTest(marker=marker_name):
+                f, _ = self.fixture(linked=True)
+                marker = f.root / ".git" / marker_name
+                marker.parent.mkdir(exist_ok=True)
+                for raw in (b"detached HEAD", b"detached HEAD\n", b" detached HEAD\n",
+                            b"detached HEAD \n", b"detached HEAD\nextra\n"):
+                    with self.subTest(raw=raw):
+                        marker.write_bytes(raw)
+                        proof = safe_delete.branch_operation_proof("codex/task", repo_path=f.root,
+                                                                  runner=f.runner)
+                        expected = marker_name != "BISECT_START" and raw in (b"detached HEAD", b"detached HEAD\n")
+                        self.assertEqual(proof.passed, expected, proof)

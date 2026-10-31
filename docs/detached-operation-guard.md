@@ -6,6 +6,11 @@ The compare-and-delete path therefore checks every worktree's qualified Git
 directory for `rebase-merge/head-name`, `rebase-apply/head-name` and `BISECT_START`.
 Either the short branch name or its full local ref holds cleanup.
 
+A rebase started from a detached HEAD records the exact `detached HEAD` sentinel
+instead of a branch. That rebase owns no branch and does not hold unrelated branch
+cleanup. This exception applies only to rebase markers, not bisect state or
+malformed variants of the sentinel.
+
 Unreadable Git directories, malformed markers, aliases and special files do not
 prove that cleanup is safe. State is read through directory descriptors without
 following aliases or blocking on a FIFO. The ordinary `git branch -d` path keeps
