@@ -7,7 +7,6 @@ import fcntl
 import json
 import os
 from pathlib import Path
-import shutil
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -18,6 +17,7 @@ from .git import (
     parse_worktree_porcelain,
     run_command,
 )
+from .preservation_publication import publish_pair, recover_pair
 
 
 Runner = Any
@@ -328,7 +328,7 @@ def preserve_branch(
         # particular, even a now-deleted or rewritten branch cannot strand a pair.
         journal = bundle.with_suffix(".preserve-journal")
         if journal.exists() or journal.is_symlink():
-            _finish_preservation_publication(journal, bundle, manifest)
+            recover_pair(journal, bundle, manifest)
         return _preserve_locked(
             branch, repo_path=repo_path, reason=reason, validation=validation,
             repo_name=repo_name, bundle=bundle, manifest=manifest, runner=runner,
@@ -408,16 +408,8 @@ def _preserve_locked(
                 and pending_manifest.stat().st_size > 0
             )
             if ok:
-                for artifact in (pending_bundle, pending_manifest):
-                    with artifact.open("rb") as handle:
-                        os.fsync(handle.fileno())
-                _sync_preservation_directory(Path(staging))
                 journal = bundle.with_suffix(".preserve-journal")
-                # One atomic rename makes BOTH durable candidates recoverable.
-                # TemporaryDirectory only owns the old name after this point.
-                Path(staging).rename(journal)
-                _sync_preservation_directory(bundle.parent)
-                _finish_preservation_publication(journal, bundle, manifest)
+                publish_pair(Path(staging), journal, bundle, manifest)
     except OSError as exc:
         return {"ok": False, "error": f"preservation publication failed; retry to recover: {exc}"}
     return {
@@ -428,42 +420,6 @@ def _preserve_locked(
         "verify": verify.stdout or verify.stderr,
         "error": "" if ok else "bundle or manifest missing/empty after write",
     }
-
-
-def _sync_preservation_directory(path: Path) -> None:
-    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
-def _finish_preservation_publication(journal: Path, bundle: Path, manifest: Path) -> None:
-    """Replay publication under the directory lock, including after process death.
-
-    Journal originals survive both renames. Only after both destination entries
-    are durable do we remove the journal manifest (the completion marker), then
-    clean up. A crash during cleanup can therefore also be recovered safely.
-    """
-    if journal.is_symlink() or not journal.is_dir():
-        raise OSError(f"invalid preservation journal: {journal}")
-    saved_manifest = journal / manifest.name
-    if saved_manifest.exists():
-        for destination in (bundle, manifest):
-            source = journal / destination.name
-            if source.is_symlink() or not source.is_file():
-                raise OSError(f"incomplete preservation journal: {journal}")
-            # Keep a durable original in the journal until BOTH outputs exist.
-            # Rename replaces aliases instead of writing through them.
-            pending = source.with_name(source.name + ".publish")
-            pending.unlink(missing_ok=True)
-            os.link(source, pending)
-            pending.replace(destination)
-            _sync_preservation_directory(destination.parent)
-        saved_manifest.unlink()
-        _sync_preservation_directory(journal)
-    shutil.rmtree(journal)
-    _sync_preservation_directory(bundle.parent)
 
 
 def _existing_bundle_conflict(
