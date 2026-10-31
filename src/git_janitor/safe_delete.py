@@ -22,7 +22,7 @@ from .git import (
 
 Runner = Any
 DEFAULT_PRESERVATION_DIR = Path("~/.local/share/git-janitor/preservation").expanduser()
-DEFAULT_DELETE_LEDGER = Path("reports/branch-cleanup-audit.jsonl")
+DEFAULT_DELETE_LEDGER = Path("~/.local/state/git-janitor/branch-cleanup-audit.jsonl").expanduser()
 
 
 @dataclass(frozen=True)
