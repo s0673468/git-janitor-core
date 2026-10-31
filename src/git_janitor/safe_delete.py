@@ -106,6 +106,9 @@ def branch_operation_proof(branch: str, *, repo_path: Path, runner: Runner = run
                 continue
             except (OSError, UnicodeError):
                 return _proof(name, False, f"cannot read {marker} in {entry.path}")
+            # Git records this sentinel when the rebase began without a branch.
+            if marker != "BISECT_START" and target == "detached HEAD":
+                continue
             valid = runner(["git", "check-ref-format",
                             f"refs/heads/{target.removeprefix('refs/heads/')}"], repo_path, 30)
             if valid.returncode != 0:
