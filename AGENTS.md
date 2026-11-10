@@ -2,9 +2,9 @@
 
 <!-- shared-rules:v1 -->
 Shared rules, skills and helper roles load on their own from this machine's
-global instructions (source: fleet-infra `agent_policy` and `skills`). This file
-holds only what is special about this project. A shared safety or approval rule
-wins over this file; for project facts, this file wins.
+global instructions. This file holds only what is special about this project.
+A shared safety or approval rule wins over this file; for project facts, this
+file wins.
 <!-- /shared-rules -->
 
 ## What this is
